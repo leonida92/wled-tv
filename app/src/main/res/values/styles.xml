@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Base TV Theme -->
+    <style name="Theme.WledTv" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowBackground">@color/bg_tv_dark</item>
+        <item name="android:colorPrimary">@color/accent_blue</item>
+        <item name="android:colorAccent">@color/accent_blue</item>
+        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textColorSecondary">@color/text_secondary</item>
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
+
+    <!-- TV Card Focus Style -->
+    <style name="TvCard">
+        <item name="android:focusable">true</item>
+        <item name="android:focusableInTouchMode">true</item>
+        <item name="android:background">@drawable/bg_card_selector</item>
+        <item name="android:clickable">true</item>
+    </style>
+
+    <!-- TV Button Style -->
+    <style name="TvButton">
+        <item name="android:focusable">true</item>
+        <item name="android:focusableInTouchMode">true</item>
+        <item name="android:background">@drawable/bg_button_selector</item>
+        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textSize">16sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:gravity">center</item>
+        <item name="android:paddingStart">24dp</item>
+        <item name="android:paddingEnd">24dp</item>
+    </style>
+
+    <!-- TV Typography Styles -->
+    <style name="TvTitleLarge">
+        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textSize">28sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="TvBody">
+        <item name="android:textColor">@color/text_secondary</item>
+        <item name="android:textSize">14sp</item>
+    </style>
+
+    <!-- TV Setting Item Style -->
+    <style name="TvSettingItem">
+        <item name="android:focusable">true</item>
+        <item name="android:focusableInTouchMode">true</item>
+        <item name="android:background">@drawable/bg_card_selector</item>
+        <item name="android:clickable">true</item>
+        <item name="android:padding">16dp</item>
+        <item name="android:layout_marginBottom">8dp</item>
+    </style>
+
+    <style name="TvSettingTitle">
+        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textSize">16sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="TvSettingValue">
+        <item name="android:textColor">@color/accent_blue</item>
+        <item name="android:textSize">16sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="TvSettingSub">
+        <item name="android:textColor">@color/text_muted</item>
+        <item name="android:textSize">12sp</item>
+        <item name="android:layout_marginTop">2dp</item>
+    </style>
+</resources>

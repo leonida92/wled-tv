@@ -1,0 +1,195 @@
+package com.wled.tv.ui
+
+import android.os.Bundle
+import android.view.KeyEvent
+import android.view.View
+import android.widget.Button
+import android.widget.TextView
+import androidx.appcompat.app.AppCompatActivity
+import com.wled.tv.R
+import com.wled.tv.data.PreferencesRepository
+import com.wled.tv.model.AspectRatioPreset
+import com.wled.tv.model.WledConfig
+import com.wled.tv.service.AmbientCaptureService
+import com.wled.tv.ui.views.ActiveBorder
+import com.wled.tv.ui.views.ZoneCanvasView
+import java.util.Locale
+
+class ZoneEditorActivity : AppCompatActivity() {
+
+    private lateinit var prefsRepo: PreferencesRepository
+    private var config: WledConfig = WledConfig()
+
+    private lateinit var zoneCanvas: ZoneCanvasView
+    private lateinit var btnAspectPreset: Button
+    private lateinit var btnTargetTop: Button
+    private lateinit var btnTargetBottom: Button
+    private lateinit var btnTargetLeft: Button
+    private lateinit var btnTargetRight: Button
+    private lateinit var btnResetZones: Button
+    private lateinit var btnDone: Button
+    private lateinit var tvInstruction: TextView
+
+    private var activeBorder: ActiveBorder = ActiveBorder.TOP
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_zone_editor)
+
+        prefsRepo = PreferencesRepository(this)
+        config = prefsRepo.loadConfig()
+
+        bindViews()
+        setupListeners()
+        updateUi()
+    }
+
+    private fun bindViews() {
+        zoneCanvas = findViewById(R.id.zoneCanvas)
+        btnAspectPreset = findViewById(R.id.btnAspectPreset)
+        btnTargetTop = findViewById(R.id.btnTargetTop)
+        btnTargetBottom = findViewById(R.id.btnTargetBottom)
+        btnTargetLeft = findViewById(R.id.btnTargetLeft)
+        btnTargetRight = findViewById(R.id.btnTargetRight)
+        btnResetZones = findViewById(R.id.btnResetZones)
+        btnDone = findViewById(R.id.btnDone)
+        tvInstruction = findViewById(R.id.tvInstruction)
+
+        btnTargetTop.requestFocus()
+    }
+
+    private fun setupListeners() {
+        btnTargetTop.setOnFocusChangeListener { _, hasFocus ->
+            if (hasFocus) selectBorder(ActiveBorder.TOP)
+        }
+        btnTargetBottom.setOnFocusChangeListener { _, hasFocus ->
+            if (hasFocus) selectBorder(ActiveBorder.BOTTOM)
+        }
+        btnTargetLeft.setOnFocusChangeListener { _, hasFocus ->
+            if (hasFocus) selectBorder(ActiveBorder.LEFT)
+        }
+        btnTargetRight.setOnFocusChangeListener { _, hasFocus ->
+            if (hasFocus) selectBorder(ActiveBorder.RIGHT)
+        }
+
+        btnTargetTop.setOnClickListener { adjustActiveBorder(0.01f) }
+        btnTargetBottom.setOnClickListener { adjustActiveBorder(0.01f) }
+        btnTargetLeft.setOnClickListener { adjustActiveBorder(0.01f) }
+        btnTargetRight.setOnClickListener { adjustActiveBorder(0.01f) }
+
+        val borderKeyListener = View.OnKeyListener { _, keyCode, event ->
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                when (keyCode) {
+                    KeyEvent.KEYCODE_DPAD_UP -> {
+                        adjustActiveBorder(0.01f)
+                        true
+                    }
+                    KeyEvent.KEYCODE_DPAD_DOWN -> {
+                        adjustActiveBorder(-0.01f)
+                        true
+                    }
+                    else -> false
+                }
+            } else false
+        }
+
+        btnTargetTop.setOnKeyListener(borderKeyListener)
+        btnTargetBottom.setOnKeyListener(borderKeyListener)
+        btnTargetLeft.setOnKeyListener(borderKeyListener)
+        btnTargetRight.setOnKeyListener(borderKeyListener)
+
+        btnResetZones.setOnClickListener {
+            resetToAspectPreset(AspectRatioPreset.FULL_16_9)
+        }
+
+        btnDone.setOnClickListener {
+            finish()
+        }
+
+        btnAspectPreset.setOnClickListener {
+            cycleAspectRatioPreset()
+        }
+        btnAspectPreset.setOnKeyListener { _, keyCode, event ->
+            if (event.action == KeyEvent.ACTION_DOWN && (keyCode == KeyEvent.KEYCODE_DPAD_UP || keyCode == KeyEvent.KEYCODE_DPAD_DOWN)) {
+                cycleAspectRatioPreset()
+                true
+            } else false
+        }
+    }
+
+    private fun selectBorder(border: ActiveBorder) {
+        activeBorder = border
+        zoneCanvas.setActiveBorder(border)
+        updateStatusText()
+    }
+
+    private fun cycleAspectRatioPreset() {
+        val current = config.perimeter.getActiveAspectRatioPreset()
+        val allPresets = AspectRatioPreset.values().filter { it != AspectRatioPreset.CUSTOM }
+        val currentIndex = allPresets.indexOf(current)
+        val nextPreset = if (currentIndex < 0 || currentIndex >= allPresets.size - 1) {
+            allPresets[0]
+        } else {
+            allPresets[currentIndex + 1]
+        }
+        resetToAspectPreset(nextPreset)
+    }
+
+    private fun resetToAspectPreset(preset: AspectRatioPreset) {
+        val p = config.perimeter.copy(
+            topCrop = preset.topCrop,
+            bottomCrop = preset.bottomCrop,
+            leftCrop = preset.leftCrop,
+            rightCrop = preset.rightCrop
+        )
+        config = config.copy(perimeter = p)
+        saveAndUpdate()
+    }
+
+    private fun adjustActiveBorder(delta: Float) {
+        val p = config.perimeter
+        val updatedPerimeter = when (activeBorder) {
+            ActiveBorder.TOP -> p.copy(topCrop = (p.topCrop + delta).coerceIn(0f, 0.40f))
+            ActiveBorder.BOTTOM -> p.copy(bottomCrop = (p.bottomCrop + delta).coerceIn(0f, 0.40f))
+            ActiveBorder.LEFT -> p.copy(leftCrop = (p.leftCrop + delta).coerceIn(0f, 0.40f))
+            ActiveBorder.RIGHT -> p.copy(rightCrop = (p.rightCrop + delta).coerceIn(0f, 0.40f))
+            ActiveBorder.NONE -> p
+        }
+        config = config.copy(perimeter = updatedPerimeter)
+        saveAndUpdate()
+    }
+
+    private fun saveAndUpdate() {
+        prefsRepo.saveConfig(config)
+        updateUi()
+        if (AmbientCaptureService.isRunning) {
+            AmbientCaptureService.currentServiceInstance?.reloadConfig()
+        }
+    }
+
+    private fun updateUi() {
+        zoneCanvas.setConfig(config.perimeter, activeBorder)
+        val p = config.perimeter
+        btnTargetTop.text = String.format(Locale.US, "▲ Top: %.0f%% ▼", p.topCrop * 100)
+        btnTargetBottom.text = String.format(Locale.US, "▲ Bot: %.0f%% ▼", p.bottomCrop * 100)
+        btnTargetLeft.text = String.format(Locale.US, "▲ Left: %.0f%% ▼", p.leftCrop * 100)
+        btnTargetRight.text = String.format(Locale.US, "▲ Right: %.0f%% ▼", p.rightCrop * 100)
+
+        val preset = p.getActiveAspectRatioPreset()
+        btnAspectPreset.text = "Aspect: ${preset.displayName}"
+
+        updateStatusText()
+    }
+
+    private fun updateStatusText() {
+        val p = config.perimeter
+        val activeVal = when (activeBorder) {
+            ActiveBorder.TOP -> "Top: ${(p.topCrop * 100).toInt()}%"
+            ActiveBorder.BOTTOM -> "Bottom: ${(p.bottomCrop * 100).toInt()}%"
+            ActiveBorder.LEFT -> "Left: ${(p.leftCrop * 100).toInt()}%"
+            ActiveBorder.RIGHT -> "Right: ${(p.rightCrop * 100).toInt()}%"
+            ActiveBorder.NONE -> ""
+        }
+        tvInstruction.text = "Active: $activeVal | D-pad Left/Right: select border | D-pad Up/Down: adjust inset"
+    }
+}

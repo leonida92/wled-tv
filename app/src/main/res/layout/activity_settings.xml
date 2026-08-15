@@ -1,0 +1,277 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg_tv_dark"
+    android:orientation="vertical"
+    android:paddingStart="40dp"
+    android:paddingTop="28dp"
+    android:paddingEnd="40dp"
+    android:paddingBottom="28dp">
+
+    <!-- Header Bar -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:layout_marginBottom="24dp">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/title_settings"
+                style="@style/TvTitleLarge" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="Configure LED counts, corner origin, and wiring direction"
+                style="@style/TvBody" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tvSettingsTotalBadge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_card"
+            android:paddingStart="18dp"
+            android:paddingTop="8dp"
+            android:paddingEnd="18dp"
+            android:paddingBottom="8dp"
+            android:text="Total: 96 LEDs"
+            android:textColor="@color/accent_cyan"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:clipToPadding="false">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <!-- Top LEDs Counter -->
+            <LinearLayout
+                android:id="@+id/itemTopLeds"
+                style="@style/TvSettingItem"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/pref_top_leds"
+                    style="@style/TvSettingTitle" />
+
+                <ImageView
+                    android:layout_width="28dp"
+                    android:layout_height="28dp"
+                    android:src="@drawable/ic_arrow_left"
+                    app:tint="@color/accent_blue" />
+
+                <TextView
+                    android:id="@+id/tvTopLedsValue"
+                    android:layout_width="80dp"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:text="54"
+                    android:textColor="@color/accent_cyan"
+                    android:textSize="18sp"
+                    android:textStyle="bold" />
+
+                <ImageView
+                    android:layout_width="28dp"
+                    android:layout_height="28dp"
+                    android:src="@drawable/ic_arrow_right"
+                    app:tint="@color/accent_blue" />
+            </LinearLayout>
+
+            <!-- Right LEDs Counter -->
+            <LinearLayout
+                android:id="@+id/itemRightLeds"
+                style="@style/TvSettingItem"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/pref_right_leds"
+                    style="@style/TvSettingTitle" />
+
+                <ImageView
+                    android:layout_width="28dp"
+                    android:layout_height="28dp"
+                    android:src="@drawable/ic_arrow_left"
+                    app:tint="@color/accent_blue" />
+
+                <TextView
+                    android:id="@+id/tvRightLedsValue"
+                    android:layout_width="80dp"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:text="30"
+                    android:textColor="@color/accent_cyan"
+                    android:textSize="18sp"
+                    android:textStyle="bold" />
+
+                <ImageView
+                    android:layout_width="28dp"
+                    android:layout_height="28dp"
+                    android:src="@drawable/ic_arrow_right"
+                    app:tint="@color/accent_blue" />
+            </LinearLayout>
+
+            <!-- Bottom LEDs Counter -->
+            <LinearLayout
+                android:id="@+id/itemBottomLeds"
+                style="@style/TvSettingItem"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/pref_bottom_leds"
+                    style="@style/TvSettingTitle" />
+
+                <ImageView
+                    android:layout_width="28dp"
+                    android:layout_height="28dp"
+                    android:src="@drawable/ic_arrow_left"
+                    app:tint="@color/accent_blue" />
+
+                <TextView
+                    android:id="@+id/tvBottomLedsValue"
+                    android:layout_width="80dp"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:text="54"
+                    android:textColor="@color/accent_cyan"
+                    android:textSize="18sp"
+                    android:textStyle="bold" />
+
+                <ImageView
+                    android:layout_width="28dp"
+                    android:layout_height="28dp"
+                    android:src="@drawable/ic_arrow_right"
+                    app:tint="@color/accent_blue" />
+            </LinearLayout>
+
+            <!-- Left LEDs Counter -->
+            <LinearLayout
+                android:id="@+id/itemLeftLeds"
+                style="@style/TvSettingItem"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/pref_left_leds"
+                    style="@style/TvSettingTitle" />
+
+                <ImageView
+                    android:layout_width="28dp"
+                    android:layout_height="28dp"
+                    android:src="@drawable/ic_arrow_left"
+                    app:tint="@color/accent_blue" />
+
+                <TextView
+                    android:id="@+id/tvLeftLedsValue"
+                    android:layout_width="80dp"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:text="30"
+                    android:textColor="@color/accent_cyan"
+                    android:textSize="18sp"
+                    android:textStyle="bold" />
+
+                <ImageView
+                    android:layout_width="28dp"
+                    android:layout_height="28dp"
+                    android:src="@drawable/ic_arrow_right"
+                    app:tint="@color/accent_blue" />
+            </LinearLayout>
+
+            <!-- Start Corner -->
+            <LinearLayout
+                android:id="@+id/itemStartCorner"
+                style="@style/TvSettingItem"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/pref_start_corner"
+                    style="@style/TvSettingTitle" />
+
+                <TextView
+                    android:id="@+id/tvStartCornerValue"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/corner_bottom_left"
+                    android:textColor="@color/accent_cyan"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <!-- Direction -->
+            <LinearLayout
+                android:id="@+id/itemDirection"
+                style="@style/TvSettingItem"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/pref_direction"
+                    style="@style/TvSettingTitle" />
+
+                <TextView
+                    android:id="@+id/tvDirectionValue"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/dir_clockwise"
+                    android:textColor="@color/accent_cyan"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+        </LinearLayout>
+    </ScrollView>
+</LinearLayout>

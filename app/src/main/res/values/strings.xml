@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">WLED TV</string>
+    <string name="app_tagline">Real-time TV Ambient Lighting for WLED</string>
+
+    <!-- Main Dashboard -->
+    <string name="status_connected">Connected</string>
+    <string name="status_mirroring">Mirroring Screen</string>
+    <string name="status_idle">Idle</string>
+    <string name="status_disconnected">No Light Found</string>
+    <string name="btn_start_mirror">START AMBIENT</string>
+    <string name="btn_stop_mirror">STOP AMBIENT</string>
+    <string name="btn_test_strip">Test LED Connection</string>
+    <string name="btn_zone_editor">Screen Zones &amp; Crop</string>
+    <string name="btn_settings">Strip Geometry</string>
+    <string name="btn_calibration">Color &amp; Calibration</string>
+    <string name="btn_system_settings">System &amp; Connection</string>
+    <string name="card_preview_title">Live LED Perimeter Preview</string>
+    <string name="card_wled_info">WLED Controller</string>
+    <string name="card_wled_ip">IP: %1$s</string>
+    <string name="card_wled_leds">Total LEDs: %1$d</string>
+
+    <!-- Settings & Layout Screen -->
+    <string name="title_settings">Perimeter Strip Geometry</string>
+    <string name="title_system_settings">System &amp; Connection</string>
+    <string name="pref_wled_ip">WLED IP Address</string>
+    <string name="pref_wled_ip_desc">LAN IP address of your WLED controller</string>
+    <string name="pref_top_leds">Top Edge LEDs</string>
+    <string name="pref_right_leds">Right Edge LEDs</string>
+    <string name="pref_bottom_leds">Bottom Edge LEDs</string>
+    <string name="pref_left_leds">Left Edge LEDs</string>
+    <string name="pref_start_corner">Start Corner</string>
+    <string name="pref_direction">Strip Direction</string>
+    <string name="pref_fps">Capture Frame Rate</string>
+    <string name="pref_fps_desc">60 FPS (Ultra Smooth) • 30 FPS (Balanced) • 15 FPS (Power Saver)</string>
+    <string name="pref_auto_start">Auto-start on TV Boot</string>
+    <string name="pref_auto_start_desc">Start ambient lighting automatically when TV powers on</string>
+    <string name="btn_scan_lan">Scan LAN for WLED</string>
+    <string name="btn_test_connection">Test Connection</string>
+
+    <!-- Calibration Screen -->
+    <string name="title_calibration">Color &amp; Performance Calibration</string>
+    <string name="pref_saturation">Saturation Multiplier</string>
+    <string name="pref_brightness">Max Brightness</string>
+    <string name="pref_black_threshold">Black Level Cutoff (0-50)</string>
+    <string name="pref_gain_r">Red Gain</string>
+    <string name="pref_gain_g">Green Gain</string>
+    <string name="pref_gain_b">Blue Gain</string>
+    <string name="pref_smoothing">Transition Smoothing</string>
+    <string name="pref_chroma_weight">Chroma Weighting</string>
+
+    <!-- Notifications -->
+    <string name="notification_channel_name">WLED TV Ambient Service</string>
+    <string name="notification_channel_desc">Active screen capture and real-time WLED streaming</string>
+    <string name="notification_title">WLED TV Active</string>
+    <string name="notification_text">Streaming screen colors to WLED (%1$s)</string>
+    <string name="action_stop">Stop</string>
+
+    <!-- Corner and Direction Labels -->
+    <string name="corner_bottom_left">Bottom-Left</string>
+    <string name="corner_bottom_right">Bottom-Right</string>
+    <string name="corner_top_left">Top-Left</string>
+    <string name="corner_top_right">Top-Right</string>
+    <string name="dir_clockwise">Clockwise (CW)</string>
+    <string name="dir_counter_clockwise">Counter-Clockwise (CCW)</string>
+</resources>

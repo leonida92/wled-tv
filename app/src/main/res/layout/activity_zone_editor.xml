@@ -1,0 +1,186 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg_tv_dark"
+    android:orientation="vertical"
+    android:paddingStart="20dp"
+    android:paddingTop="12dp"
+    android:paddingEnd="20dp"
+    android:paddingBottom="12dp">
+
+    <!-- Top Header Bar -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Visual Screen Zone &amp; Movie Aspect Ratio Calibration"
+                android:textColor="@color/text_primary"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tvInstruction"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="Select Aspect Ratio Preset or use D-pad UP/DOWN to nudge sampling borders."
+                android:textColor="@color/accent_cyan"
+                android:textSize="13sp" />
+        </LinearLayout>
+
+        <Button
+            android:id="@+id/btnDone"
+            android:layout_width="wrap_content"
+            android:layout_height="38dp"
+            android:background="@drawable/bg_button_selector"
+            android:nextFocusDown="@+id/btnAspectPreset"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:text="Save &amp; Exit"
+            android:textColor="@color/text_primary"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <!-- Center Interactive Visual Canvas -->
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="8dp"
+        android:layout_marginBottom="8dp"
+        android:layout_weight="1"
+        android:background="@drawable/bg_card">
+
+        <com.wled.tv.ui.views.ZoneCanvasView
+            android:id="@+id/zoneCanvas"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+    </FrameLayout>
+
+    <!-- Bottom Controls Bar -->
+    <LinearLayout
+        android:id="@+id/layoutBottomBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <!-- Movie Aspect Ratio Preset Cycler -->
+        <Button
+            android:id="@+id/btnAspectPreset"
+            android:layout_width="0dp"
+            android:layout_height="42dp"
+            android:layout_weight="1.3"
+            android:layout_marginEnd="6dp"
+            android:background="@drawable/bg_card_selector"
+            android:nextFocusUp="@+id/btnDone"
+            android:nextFocusRight="@+id/btnTargetTop"
+            android:text="Aspect: 16:9"
+            android:textColor="@color/accent_cyan"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/btnTargetTop"
+            android:layout_width="0dp"
+            android:layout_height="42dp"
+            android:layout_weight="0.9"
+            android:layout_marginEnd="6dp"
+            android:background="@drawable/bg_card_selector"
+            android:nextFocusUp="@+id/btnDone"
+            android:nextFocusLeft="@+id/btnAspectPreset"
+            android:nextFocusRight="@+id/btnTargetBottom"
+            android:text="▲ Top: 0% ▼"
+            android:textColor="@color/text_primary"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/btnTargetBottom"
+            android:layout_width="0dp"
+            android:layout_height="42dp"
+            android:layout_weight="0.9"
+            android:layout_marginEnd="6dp"
+            android:background="@drawable/bg_card_selector"
+            android:nextFocusUp="@+id/btnDone"
+            android:nextFocusLeft="@+id/btnTargetTop"
+            android:nextFocusRight="@+id/btnTargetLeft"
+            android:text="▲ Bot: 0% ▼"
+            android:textColor="@color/text_primary"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/btnTargetLeft"
+            android:layout_width="0dp"
+            android:layout_height="42dp"
+            android:layout_weight="0.85"
+            android:layout_marginEnd="6dp"
+            android:background="@drawable/bg_card_selector"
+            android:nextFocusUp="@+id/btnDone"
+            android:nextFocusLeft="@+id/btnTargetBottom"
+            android:nextFocusRight="@+id/btnTargetRight"
+            android:text="▲ Left: 0% ▼"
+            android:textColor="@color/text_primary"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/btnTargetRight"
+            android:layout_width="0dp"
+            android:layout_height="42dp"
+            android:layout_weight="0.85"
+            android:layout_marginEnd="6dp"
+            android:background="@drawable/bg_card_selector"
+            android:nextFocusUp="@+id/btnDone"
+            android:nextFocusLeft="@+id/btnTargetLeft"
+            android:nextFocusRight="@+id/btnTargetDepth"
+            android:text="▲ Right: 0% ▼"
+            android:textColor="@color/text_primary"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/btnTargetDepth"
+            android:layout_width="0dp"
+            android:layout_height="42dp"
+            android:layout_weight="0.95"
+            android:layout_marginEnd="6dp"
+            android:background="@drawable/bg_card_selector"
+            android:nextFocusUp="@+id/btnDone"
+            android:nextFocusLeft="@+id/btnTargetRight"
+            android:nextFocusRight="@+id/btnResetZones"
+            android:text="▲ Depth: 12% ▼"
+            android:textColor="@color/text_primary"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/btnResetZones"
+            android:layout_width="wrap_content"
+            android:layout_height="42dp"
+            android:background="@drawable/bg_card_selector"
+            android:nextFocusUp="@+id/btnDone"
+            android:nextFocusLeft="@+id/btnTargetDepth"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:text="Reset"
+            android:textColor="@color/text_muted"
+            android:textSize="12sp" />
+
+    </LinearLayout>
+
+</LinearLayout>

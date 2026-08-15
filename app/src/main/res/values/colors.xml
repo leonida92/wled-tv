@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Background & Surfaces (True OLED Pitch Black TV Theme) -->
+    <color name="bg_tv_dark">#000000</color>
+    <color name="surface_dark">#05080E</color>
+    <color name="surface_card">#0A0E17</color>
+    <color name="surface_card_focused">#162032</color>
+    <color name="surface_card_selected">#0E1726</color>
+
+    <!-- Accents & Focus States -->
+    <color name="accent_blue">#38BDF8</color>
+    <color name="accent_blue_glow">#60A5FA</color>
+    <color name="accent_cyan">#00E5FF</color>
+    <color name="accent_green">#00E676</color>
+    <color name="accent_amber">#FBBF24</color>
+    <color name="accent_red">#F87171</color>
+
+    <!-- Typography -->
+    <color name="text_primary">#F8FAFC</color>
+    <color name="text_secondary">#94A3B8</color>
+    <color name="text_muted">#64748B</color>
+
+    <!-- State & Borders -->
+    <color name="border_subtle">#1E293B</color>
+    <color name="focus_border">#00E5FF</color>
+    <color name="status_active">#00E676</color>
+    <color name="status_inactive">#64748B</color>
+</resources>

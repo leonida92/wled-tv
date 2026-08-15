@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="320dp"
+    android:height="180dp"
+    android:viewportWidth="320"
+    android:viewportHeight="180">
+
+    <!-- Background Gradient -->
+    <path
+        android:fillColor="#10151E"
+        android:pathData="M0,0h320v180h-320z" />
+
+    <!-- Ambient Glow Arc -->
+    <path
+        android:fillColor="#1E3250"
+        android:pathData="M30,90 C80,30 240,30 290,90 L320,180 L0,180 Z" />
+
+    <!-- TV Frame -->
+    <path
+        android:fillColor="#18202C"
+        android:strokeColor="#3D8BFF"
+        android:strokeWidth="3"
+        android:pathData="M70,35 h180 v95 h-180 z" />
+
+    <!-- TV Stand -->
+    <path
+        android:fillColor="#3D8BFF"
+        android:pathData="M150,130 h20 v15 h-20 z M135,145 h50 v5 h-50 z" />
+
+    <!-- Screen Glow Highlights -->
+    <path
+        android:fillColor="#00E5FF"
+        android:pathData="M78,43 h164 v79 h-164 z"
+        android:fillAlpha="0.25" />
+
+    <!-- LED Ambient Points -->
+    <!-- Top LEDs -->
+    <path android:fillColor="#3D8BFF" android:pathData="M60,25 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0" />
+    <path android:fillColor="#00E5FF" android:pathData="M110,25 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0" />
+    <path android:fillColor="#00E676" android:pathData="M160,25 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0" />
+    <path android:fillColor="#FFB300" android:pathData="M210,25 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0" />
+    <path android:fillColor="#FF5252" android:pathData="M260,25 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0" />
+
+    <!-- Left & Right LEDs -->
+    <path android:fillColor="#3D8BFF" android:pathData="M55,60 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0" />
+    <path android:fillColor="#3D8BFF" android:pathData="M55,100 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0" />
+    <path android:fillColor="#FF5252" android:pathData="M265,60 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0" />
+    <path android:fillColor="#FF5252" android:pathData="M265,100 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0" />
+
+</vector>
