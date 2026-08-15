@@ -53,6 +53,18 @@
             android:exported="false"
             android:screenOrientation="landscape" />
 
+        <!-- Light Setup & Multi-Device Manager -->
+        <activity
+            android:name=".ui.DeviceManagerActivity"
+            android:exported="false"
+            android:screenOrientation="landscape" />
+
+        <!-- Configure Individual Light Device -->
+        <activity
+            android:name=".ui.EditDeviceActivity"
+            android:exported="false"
+            android:screenOrientation="landscape" />
+
         <!-- System & Connection Settings (IP, FPS, Auto-start, Updates) -->
         <activity
             android:name=".ui.SystemSettingsActivity"

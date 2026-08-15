@@ -12,7 +12,7 @@
     <string name="btn_stop_mirror">STOP AMBIENT</string>
     <string name="btn_test_strip">Test LED Connection</string>
     <string name="btn_zone_editor">Screen Zones &amp; Crop</string>
-    <string name="btn_settings">Strip Geometry</string>
+    <string name="btn_settings">Light Setup &amp; Devices</string>
     <string name="btn_calibration">Color &amp; Calibration</string>
     <string name="btn_system_settings">System &amp; Connection</string>
     <string name="card_preview_title">Live LED Perimeter Preview</string>

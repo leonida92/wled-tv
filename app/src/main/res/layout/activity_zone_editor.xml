@@ -162,7 +162,7 @@
             android:background="@drawable/bg_card_selector"
             android:nextFocusUp="@+id/btnDone"
             android:nextFocusLeft="@+id/btnTargetRight"
-            android:nextFocusRight="@+id/btnResetZones"
+            android:nextFocusRight="@+id/btnAutoDetect"
             android:text="▲ Depth: 12% ▼"
             android:textColor="@color/text_primary"
             android:textSize="12sp"

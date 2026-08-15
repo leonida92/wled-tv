@@ -84,7 +84,7 @@ class MainActivity : AppCompatActivity(),
     override fun onResume() {
         super.onResume()
         config = prefsRepo.loadConfig()
-        tvPreviewView.updateConfig(config.perimeter)
+        tvPreviewView.updateDevices(config.enabledDevices)
         AmbientCaptureService.liveFrameListener = this
         AmbientCaptureService.stateListener = this
         updateUiState()
@@ -110,7 +110,6 @@ class MainActivity : AppCompatActivity(),
 
         btnTestStrip = findViewById(R.id.btnTestStrip)
         btnZoneEditor = findViewById(R.id.btnZoneEditor)
-        btnCalibration = findViewById(R.id.btnCalibration)
         btnSettings = findViewById(R.id.btnSettings)
         btnSystemSettings = findViewById(R.id.btnSystemSettings)
         tvPreviewView = findViewById(R.id.tvPreviewView)
@@ -135,12 +134,8 @@ class MainActivity : AppCompatActivity(),
             startActivity(Intent(this, ZoneEditorActivity::class.java))
         }
 
-        btnCalibration.setOnClickListener {
-            startActivity(Intent(this, CalibrationActivity::class.java))
-        }
-
         btnSettings.setOnClickListener {
-            startActivity(Intent(this, SettingsActivity::class.java))
+            startActivity(Intent(this, DeviceManagerActivity::class.java))
         }
 
         btnSystemSettings.setOnClickListener {
@@ -162,30 +157,36 @@ class MainActivity : AppCompatActivity(),
         AmbientCaptureService.isTestingOverride = true
 
         testPatternJob = lifecycleScope.launch(Dispatchers.IO) {
-            val totalLeds = config.perimeter.totalLeds
-            val testBuffer = ByteArray(totalLeds * 3)
+            val devices = config.enabledDevices
             var step = 0
 
             while (isTesting) {
-                for (i in 0 until totalLeds) {
-                    val idx = i * 3
-                    val hue = ((step * 4 + (i * 360 / totalLeds)) % 360).toFloat()
-                    val rgb = Color.HSVToColor(floatArrayOf(hue, 1.0f, 1.0f))
-                    testBuffer[idx] = Color.red(rgb).toByte()
-                    testBuffer[idx + 1] = Color.green(rgb).toByte()
-                    testBuffer[idx + 2] = Color.blue(rgb).toByte()
-                }
+                for (dev in devices) {
+                    val leds = dev.totalLeds
+                    if (leds <= 0) continue
+                    val testBuffer = ByteArray(leds * 3)
 
-                udpSender.sendDrgbFrame(
-                    ip = config.ip,
-                    port = config.port,
-                    timeoutSeconds = 2,
-                    rgb = testBuffer,
-                    ledCount = totalLeds
-                )
+                    for (i in 0 until leds) {
+                        val idx = i * 3
+                        val hue = ((step * 4 + (i * 360 / leds)) % 360).toFloat()
+                        val rgb = Color.HSVToColor(floatArrayOf(hue, 1.0f, 1.0f))
+                        testBuffer[idx] = Color.red(rgb).toByte()
+                        testBuffer[idx + 1] = Color.green(rgb).toByte()
+                        testBuffer[idx + 2] = Color.blue(rgb).toByte()
+                    }
 
-                launch(Dispatchers.Main) {
-                    tvPreviewView.updateLiveColors(testBuffer, totalLeds)
+                    udpSender.sendDrgbFrame(
+                        ip = dev.ip,
+                        port = dev.port,
+                        timeoutSeconds = 2,
+                        rgb = testBuffer,
+                        ledCount = leds,
+                        colorOrder = dev.calibration.colorOrder
+                    )
+
+                    launch(Dispatchers.Main) {
+                        tvPreviewView.updateDeviceLiveColors(dev.id, testBuffer, leds)
+                    }
                 }
 
                 step = (step + 1) % 360
@@ -200,15 +201,20 @@ class MainActivity : AppCompatActivity(),
         testPatternJob = null
         AmbientCaptureService.isTestingOverride = false
         lifecycleScope.launch(Dispatchers.IO) {
-            val totalLeds = config.perimeter.totalLeds
-            val blackBuffer = ByteArray(totalLeds * 3)
-            udpSender.sendDrgbFrame(
-                ip = config.ip,
-                port = config.port,
-                timeoutSeconds = 1,
-                rgb = blackBuffer,
-                ledCount = totalLeds
-            )
+            for (dev in config.enabledDevices) {
+                val leds = dev.totalLeds
+                if (leds > 0) {
+                    val blackBuffer = ByteArray(leds * 3)
+                    udpSender.sendDrgbFrame(
+                        ip = dev.ip,
+                        port = dev.port,
+                        timeoutSeconds = 1,
+                        rgb = blackBuffer,
+                        ledCount = leds,
+                        colorOrder = dev.colorOrder
+                    )
+                }
+            }
         }
     }
 
@@ -239,24 +245,25 @@ class MainActivity : AppCompatActivity(),
 
     private fun updateUiState() {
         val running = AmbientCaptureService.isRunning
+        val enabledCount = config.enabledDevices.size
+        val totalLeds = config.totalActiveLeds
 
         if (running) {
             btnPower.setBackgroundResource(R.drawable.bg_power_button_on)
             tvPowerText.text = getString(R.string.btn_stop_mirror)
             viewStatusDot.setBackgroundColor(Color.parseColor("#00E676"))
             tvStatusTitle.text = getString(R.string.status_mirroring)
-            tvStatusSubtitle.text = "Streaming to ${config.ip}"
+            tvStatusSubtitle.text = if (enabledCount == 1) "Streaming to ${config.ip}" else "Streaming to $enabledCount Lights"
         } else {
             btnPower.setBackgroundResource(R.drawable.bg_power_button_off)
             tvPowerText.text = getString(R.string.btn_start_mirror)
             viewStatusDot.setBackgroundColor(Color.parseColor("#64748B"))
             tvStatusTitle.text = getString(R.string.status_idle)
-            tvStatusSubtitle.text = "WLED: ${config.ip}"
+            tvStatusSubtitle.text = if (enabledCount == 1) "WLED: ${config.ip}" else "$enabledCount Lights Configured"
         }
 
-        val total = config.perimeter.totalLeds
-        tvTotalLedsBadge.text = "$total LEDs"
-        tvIpSummary.text = "WLED: ${config.ip}:${config.port}"
+        tvTotalLedsBadge.text = "$totalLeds LEDs ($enabledCount Lights)"
+        tvIpSummary.text = if (enabledCount == 1) "WLED: ${config.ip}:${config.port}" else "$enabledCount Active WLED Controllers"
         tvDirectionSummary.text = "${config.perimeter.direction.name} • ${config.calibration.fps} FPS"
     }
 
@@ -275,10 +282,10 @@ class MainActivity : AppCompatActivity(),
         }
     }
 
-    override fun onFrameProcessed(rgb: ByteArray, count: Int) {
+    override fun onDeviceFrameProcessed(deviceId: String, rgb: ByteArray, count: Int) {
         if (!isTesting) {
             runOnUiThread {
-                tvPreviewView.updateLiveColors(rgb, count)
+                tvPreviewView.updateDeviceLiveColors(deviceId, rgb, count)
             }
         }
     }

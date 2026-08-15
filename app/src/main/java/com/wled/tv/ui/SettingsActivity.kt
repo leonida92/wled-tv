@@ -10,13 +10,23 @@ import com.wled.tv.R
 import com.wled.tv.data.PreferencesRepository
 import com.wled.tv.model.Corner
 import com.wled.tv.model.Direction
+import com.wled.tv.model.PerimeterConfig
 import com.wled.tv.model.WledConfig
+import com.wled.tv.model.WledDevice
 import com.wled.tv.service.AmbientCaptureService
 
 class SettingsActivity : AppCompatActivity() {
 
     private lateinit var prefsRepo: PreferencesRepository
     private var config: WledConfig = WledConfig()
+    private var targetDeviceId: String? = null
+
+    private val targetDevice: WledDevice
+        get() = if (targetDeviceId != null) {
+            config.devices.firstOrNull { it.id == targetDeviceId } ?: config.primaryDevice
+        } else {
+            config.primaryDevice
+        }
 
     private lateinit var tvSettingsTotalBadge: TextView
 
@@ -38,6 +48,7 @@ class SettingsActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_settings)
 
+        targetDeviceId = intent.getStringExtra(EXTRA_DEVICE_ID)
         prefsRepo = PreferencesRepository(this)
         config = prefsRepo.loadConfig()
 
@@ -68,31 +79,27 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun setupListeners() {
         setupLedCountStepper(itemTopLeds, onAdjust = { delta ->
-            val p = config.perimeter
+            val p = targetDevice.perimeter
             val newCount = (p.topLeds + delta).coerceIn(0, 300)
-            config = config.copy(perimeter = p.copy(topLeds = newCount))
-            saveAndUpdate()
+            updateTargetPerimeter(p.copy(topLeds = newCount))
         })
 
         setupLedCountStepper(itemRightLeds, onAdjust = { delta ->
-            val p = config.perimeter
+            val p = targetDevice.perimeter
             val newCount = (p.rightLeds + delta).coerceIn(0, 300)
-            config = config.copy(perimeter = p.copy(rightLeds = newCount))
-            saveAndUpdate()
+            updateTargetPerimeter(p.copy(rightLeds = newCount))
         })
 
         setupLedCountStepper(itemBottomLeds, onAdjust = { delta ->
-            val p = config.perimeter
+            val p = targetDevice.perimeter
             val newCount = (p.bottomLeds + delta).coerceIn(0, 300)
-            config = config.copy(perimeter = p.copy(bottomLeds = newCount))
-            saveAndUpdate()
+            updateTargetPerimeter(p.copy(bottomLeds = newCount))
         })
 
         setupLedCountStepper(itemLeftLeds, onAdjust = { delta ->
-            val p = config.perimeter
+            val p = targetDevice.perimeter
             val newCount = (p.leftLeds + delta).coerceIn(0, 300)
-            config = config.copy(perimeter = p.copy(leftLeds = newCount))
-            saveAndUpdate()
+            updateTargetPerimeter(p.copy(leftLeds = newCount))
         })
 
         itemStartCorner.setOnClickListener { cycleCorner() }
@@ -110,6 +117,13 @@ class SettingsActivity : AppCompatActivity() {
                 true
             } else false
         }
+    }
+
+    private fun updateTargetPerimeter(newPerimeter: PerimeterConfig) {
+        val dev = targetDevice
+        val updatedDev = dev.copy(perimeter = newPerimeter)
+        config = config.updateDevice(updatedDev)
+        saveAndUpdate()
     }
 
     private fun setupLedCountStepper(view: View, onAdjust: (Int) -> Unit) {
@@ -132,24 +146,24 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun cycleCorner() {
-        val nextCorner = when (config.perimeter.startCorner) {
+        val p = targetDevice.perimeter
+        val nextCorner = when (p.startCorner) {
             Corner.BOTTOM_LEFT -> Corner.TOP_LEFT
             Corner.TOP_LEFT -> Corner.TOP_RIGHT
             Corner.TOP_RIGHT -> Corner.BOTTOM_RIGHT
             Corner.BOTTOM_RIGHT -> Corner.BOTTOM_LEFT
         }
-        config = config.copy(perimeter = config.perimeter.copy(startCorner = nextCorner))
-        saveAndUpdate()
+        updateTargetPerimeter(p.copy(startCorner = nextCorner))
     }
 
     private fun cycleDirection() {
-        val nextDir = if (config.perimeter.direction == Direction.CLOCKWISE) {
+        val p = targetDevice.perimeter
+        val nextDir = if (p.direction == Direction.CLOCKWISE) {
             Direction.COUNTER_CLOCKWISE
         } else {
             Direction.CLOCKWISE
         }
-        config = config.copy(perimeter = config.perimeter.copy(direction = nextDir))
-        saveAndUpdate()
+        updateTargetPerimeter(p.copy(direction = nextDir))
     }
 
     private fun saveAndUpdate() {
@@ -161,23 +175,28 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun updateUiValues() {
-        val p = config.perimeter
+        val dev = targetDevice
+        val p = dev.perimeter
+        tvSettingsTotalBadge.text = "${p.totalLeds} LEDs"
         tvTopLedsValue.text = "${p.topLeds}"
         tvRightLedsValue.text = "${p.rightLeds}"
         tvBottomLedsValue.text = "${p.bottomLeds}"
         tvLeftLedsValue.text = "${p.leftLeds}"
-        tvSettingsTotalBadge.text = "Total: ${p.totalLeds} LEDs"
 
         tvStartCornerValue.text = when (p.startCorner) {
             Corner.BOTTOM_LEFT -> getString(R.string.corner_bottom_left)
-            Corner.BOTTOM_RIGHT -> getString(R.string.corner_bottom_right)
             Corner.TOP_LEFT -> getString(R.string.corner_top_left)
             Corner.TOP_RIGHT -> getString(R.string.corner_top_right)
+            Corner.BOTTOM_RIGHT -> getString(R.string.corner_bottom_right)
         }
 
         tvDirectionValue.text = when (p.direction) {
             Direction.CLOCKWISE -> getString(R.string.dir_clockwise)
             Direction.COUNTER_CLOCKWISE -> getString(R.string.dir_counter_clockwise)
         }
+    }
+
+    companion object {
+        const val EXTRA_DEVICE_ID = "extra_device_id"
     }
 }

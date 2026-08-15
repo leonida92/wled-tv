@@ -3,7 +3,9 @@ package com.wled.tv.processing
 import android.graphics.RectF
 import android.media.Image
 import com.wled.tv.model.ColorCalibration
+import com.wled.tv.model.DeviceType
 import com.wled.tv.model.PerimeterConfig
+import com.wled.tv.model.WledDevice
 import java.nio.ByteBuffer
 import kotlin.math.max
 import kotlin.math.min
@@ -12,7 +14,7 @@ import kotlin.math.roundToInt
 
 class ScreenColorProcessor {
 
-    private val smoothingFilter = ColorSmoothingFilter()
+    private val smoothingFilters = HashMap<String, ColorSmoothingFilter>()
     private var rawRgbBuffer = ByteArray(0)
 
     // Dynamic Letterbox Auto-Detection state
@@ -26,7 +28,7 @@ class ScreenColorProcessor {
     private var lastAppliedBottomCrop: Float = -1f
 
     fun reset() {
-        smoothingFilter.reset()
+        smoothingFilters.clear()
         detectedTopCrop = 0.0f
         detectedBottomCrop = 0.0f
         candidateTopCrop = 0.0f
@@ -38,13 +40,12 @@ class ScreenColorProcessor {
     }
 
     /**
-     * Extracts chroma-weighted edge RGB colors from an Android MediaProjection Image.
+     * Extracts chroma-weighted colors from an Image for a specific WLED device.
      */
-    fun processImage(
+    fun processDevice(
         image: Image,
-        zones: List<RectF>,
+        device: WledDevice,
         calibration: ColorCalibration,
-        perimeterConfig: PerimeterConfig? = null,
         outputRgb: ByteArray
     ): Boolean {
         val planes = image.planes
@@ -57,186 +58,295 @@ class ScreenColorProcessor {
         val rowStride = plane.rowStride
         val pixelStride = plane.pixelStride
 
-        return processImage(
+        return processDevice(
             buffer = buffer,
             width = width,
             height = height,
             rowStride = rowStride,
             pixelStride = pixelStride,
-            zones = zones,
+            device = device,
             calibration = calibration,
-            perimeterConfig = perimeterConfig,
             outputRgb = outputRgb
         )
     }
 
     /**
-     * Processes a downsampled screen buffer and extracts the chroma-weighted average RGB
-     * for each LED along the screen's 4-sided perimeter with advanced color grading.
+     * Extracts colors for a specific WLED device based on its configured type and region.
      */
-    fun processImage(
+    fun processDevice(
         buffer: ByteBuffer,
         width: Int,
         height: Int,
         rowStride: Int,
         pixelStride: Int,
-        zones: List<RectF>,
+        device: WledDevice,
         calibration: ColorCalibration,
-        perimeterConfig: PerimeterConfig? = null,
         outputRgb: ByteArray
     ): Boolean {
         if (width <= 0 || height <= 0) return false
 
-        // Determine active zones (dynamic if autoLetterbox is enabled, else static zones)
-        val activeZones: List<RectF>
-        if (perimeterConfig?.autoLetterbox == true) {
-            detectLetterbox(buffer, width, height, rowStride, pixelStride)
-            if (cachedDynamicZones == null || detectedTopCrop != lastAppliedTopCrop || detectedBottomCrop != lastAppliedBottomCrop) {
-                cachedDynamicZones = perimeterConfig.copy(
-                    topCrop = detectedTopCrop,
-                    bottomCrop = detectedBottomCrop
-                ).computeLedZones()
-                lastAppliedTopCrop = detectedTopCrop
-                lastAppliedBottomCrop = detectedBottomCrop
-            }
-            activeZones = cachedDynamicZones ?: zones
-        } else {
-            activeZones = zones
-        }
+        // Run real-time letterbox scan on every frame
+        detectLetterbox(buffer, width, height, rowStride, pixelStride)
 
+        return if (device.type == DeviceType.PERIMETER || (device.perimeter.totalLeds > 0 && device.perimeter.totalLeds == device.totalLeds)) {
+            processPerimeter(buffer, width, height, rowStride, pixelStride, device, calibration, outputRgb)
+        } else {
+            processAmbientRegion(buffer, width, height, rowStride, pixelStride, device, calibration, outputRgb)
+        }
+    }
+
+    private fun processPerimeter(
+        buffer: ByteBuffer,
+        width: Int,
+        height: Int,
+        rowStride: Int,
+        pixelStride: Int,
+        device: WledDevice,
+        calibration: ColorCalibration,
+        outputRgb: ByteArray
+    ): Boolean {
+        val perimeter = device.perimeter
+
+        val topCrop = if (perimeter.autoLetterbox || detectedTopCrop > 0.005f) detectedTopCrop else perimeter.topCrop
+        val bottomCrop = if (perimeter.autoLetterbox || detectedBottomCrop > 0.005f) detectedBottomCrop else perimeter.bottomCrop
+
+        val dynamicPerimeter = perimeter.copy(
+            topCrop = topCrop,
+            bottomCrop = bottomCrop
+        )
+        val activeZones = dynamicPerimeter.computeLedZones()
         val ledCount = activeZones.size
         if (ledCount == 0) return false
 
         val requiredRawSize = ledCount * 3
-        if (rawRgbBuffer.size != requiredRawSize) {
+        if (rawRgbBuffer.size < requiredRawSize) {
             rawRgbBuffer = ByteArray(requiredRawSize)
         }
 
-        val sat = calibration.saturation.coerceIn(0.5f, 3.0f)
-        val contrast = calibration.contrast.coerceIn(0.5f, 1.5f)
-        val gR = calibration.gainR.coerceIn(0.2f, 2.5f)
-        val gG = calibration.gainG.coerceIn(0.2f, 2.5f)
-        val gB = calibration.gainB.coerceIn(0.2f, 2.5f)
-        val gammaR = calibration.gammaR.coerceIn(0.5f, 2.5f)
-        val gammaG = calibration.gammaG.coerceIn(0.5f, 2.5f)
-        val gammaB = calibration.gammaB.coerceIn(0.5f, 2.5f)
-        val maxBrightness = calibration.maxBrightness.coerceIn(0, 255)
-        val blackCutoff = calibration.blackThreshold.coerceIn(0, 50).toFloat()
-
         for (i in 0 until ledCount) {
             val zone = activeZones[i]
-            val x0 = (zone.left * width).toInt().coerceIn(0, width - 1)
-            val x1 = (zone.right * width).toInt().coerceIn(x0 + 1, width)
-            val y0 = (zone.top * height).toInt().coerceIn(0, height - 1)
-            val y1 = (zone.bottom * height).toInt().coerceIn(y0 + 1, height)
+            val rgb = sampleChromaWeightedBox(buffer, width, height, rowStride, pixelStride, zone, calibration)
+            val outIdx = i * 3
+            rawRgbBuffer[outIdx] = rgb[0]
+            rawRgbBuffer[outIdx + 1] = rgb[1]
+            rawRgbBuffer[outIdx + 2] = rgb[2]
+        }
 
-            val zoneW = max(1, x1 - x0)
-            val zoneH = max(1, y1 - y0)
-            val stepX = max(1, zoneW / 8)
-            val stepY = max(1, zoneH / 8)
+        val filter = smoothingFilters.getOrPut(device.id) { ColorSmoothingFilter() }
+        filter.apply(rawRgbBuffer, ledCount, calibration.smoothingFactor, outputRgb)
+        return true
+    }
 
-            var sumR = 0.0
-            var sumG = 0.0
-            var sumB = 0.0
-            var weightSum = 0.0
+    private fun processAmbientRegion(
+        buffer: ByteBuffer,
+        width: Int,
+        height: Int,
+        rowStride: Int,
+        pixelStride: Int,
+        device: WledDevice,
+        calibration: ColorCalibration,
+        outputRgb: ByteArray
+    ): Boolean {
+        val ledCount = device.totalLeds.coerceAtLeast(1)
+        val requiredRawSize = ledCount * 3
+        if (rawRgbBuffer.size < requiredRawSize) {
+            rawRgbBuffer = ByteArray(requiredRawSize)
+        }
 
-            for (y in y0 until y1 step stepY) {
-                val rowOffset = y * rowStride
-                for (x in x0 until x1 step stepX) {
-                    val pixelOffset = rowOffset + x * pixelStride
-                    if (pixelOffset + 3 > buffer.limit()) continue
+        val topCrop = if (device.perimeter.autoLetterbox || detectedTopCrop > 0.005f) detectedTopCrop else device.perimeter.topCrop
+        val bottomCrop = if (device.perimeter.autoLetterbox || detectedBottomCrop > 0.005f) detectedBottomCrop else device.perimeter.bottomCrop
+        val activeTop = topCrop.coerceIn(0f, 0.40f)
+        val activeBottom = (1.0f - bottomCrop).coerceIn(0.60f, 1.0f)
+        val activeHeight = (activeBottom - activeTop).coerceAtLeast(0.1f)
 
-                    val r = buffer.get(pixelOffset).toInt() and 0xFF
-                    val g = buffer.get(pixelOffset + 1).toInt() and 0xFF
-                    val b = buffer.get(pixelOffset + 2).toInt() and 0xFF
+        val region = when (device.type) {
+            DeviceType.PERIMETER -> RectF(0f, activeTop, 1f, activeBottom)
+            DeviceType.LEFT_AMBIENT -> RectF(0f, activeTop, 0.25f, activeBottom)
+            DeviceType.RIGHT_AMBIENT -> RectF(0.75f, activeTop, 1f, activeBottom)
+            DeviceType.TOP_AMBIENT -> RectF(0f, activeTop, 1f, activeTop + 0.25f * activeHeight)
+            DeviceType.BOTTOM_AMBIENT -> RectF(0f, activeBottom - 0.25f * activeHeight, 1f, activeBottom)
+            DeviceType.FULL_SCREEN -> RectF(0f, activeTop, 1f, activeBottom)
+            DeviceType.CUSTOM_BOX -> device.customRect
+        }
 
-                    val maxVal = max(r, max(g, b))
-                    if (maxVal < 4) continue // ignore absolute zero noise
-
-                    val minVal = min(r, min(g, b))
-                    val chroma = (maxVal - minVal) / 255.0f
-                    val luma = (0.299f * r + 0.587f * g + 0.114f * b) / 255.0f
-
-                    // Chroma-weighted importance formula
-                    val weight = 0.35 + luma + (chroma * 2.0)
-
-                    sumR += r * weight
-                    sumG += g * weight
-                    sumB += b * weight
-                    weightSum += weight
+        if (ledCount == 1) {
+            // Single spot light / bulb
+            val rgb = sampleChromaWeightedBox(buffer, width, height, rowStride, pixelStride, region, calibration)
+            rawRgbBuffer[0] = rgb[0]
+            rawRgbBuffer[1] = rgb[1]
+            rawRgbBuffer[2] = rgb[2]
+        } else {
+            // Multi-LED Strip / Lightbar: Spatially slice the region across all LEDs
+            for (i in 0 until ledCount) {
+                val subZone = when (device.type) {
+                    DeviceType.LEFT_AMBIENT -> {
+                        val step = (region.bottom - region.top) / ledCount
+                        val b = region.bottom - (i * step)
+                        val t = b - step
+                        RectF(region.left, t.coerceAtLeast(region.top), region.right, b.coerceAtMost(region.bottom))
+                    }
+                    DeviceType.RIGHT_AMBIENT -> {
+                        val step = (region.bottom - region.top) / ledCount
+                        val b = region.bottom - (i * step)
+                        val t = b - step
+                        RectF(region.left, t.coerceAtLeast(region.top), region.right, b.coerceAtMost(region.bottom))
+                    }
+                    DeviceType.TOP_AMBIENT -> {
+                        val step = (region.right - region.left) / ledCount
+                        val l = region.left + (i * step)
+                        val r = l + step
+                        RectF(l.coerceAtLeast(region.left), region.top, r.coerceAtMost(region.right), region.bottom)
+                    }
+                    DeviceType.BOTTOM_AMBIENT -> {
+                        val step = (region.right - region.left) / ledCount
+                        val l = region.left + (i * step)
+                        val r = l + step
+                        RectF(l.coerceAtLeast(region.left), region.top, r.coerceAtMost(region.right), region.bottom)
+                    }
+                    else -> {
+                        val step = (region.right - region.left) / ledCount
+                        val l = region.left + (i * step)
+                        val r = l + step
+                        RectF(l.coerceAtLeast(region.left), region.top, r.coerceAtMost(region.right), region.bottom)
+                    }
                 }
+
+                val rgb = sampleChromaWeightedBox(buffer, width, height, rowStride, pixelStride, subZone, calibration)
+                val outIdx = i * 3
+                rawRgbBuffer[outIdx] = rgb[0]
+                rawRgbBuffer[outIdx + 1] = rgb[1]
+                rawRgbBuffer[outIdx + 2] = rgb[2]
             }
+        }
 
-            var outR: Float
-            var outG: Float
-            var outB: Float
+        val filter = smoothingFilters.getOrPut(device.id) { ColorSmoothingFilter() }
+        filter.apply(rawRgbBuffer, ledCount, calibration.smoothingFactor, outputRgb)
+        return true
+    }
 
-            if (weightSum < 0.001) {
+    private fun sampleChromaWeightedBox(
+        buffer: ByteBuffer,
+        width: Int,
+        height: Int,
+        rowStride: Int,
+        pixelStride: Int,
+        zone: RectF,
+        calibration: ColorCalibration
+    ): ByteArray {
+        val x0 = (zone.left * width).toInt().coerceIn(0, width - 1)
+        val x1 = (zone.right * width).toInt().coerceIn(x0 + 1, width)
+        val y0 = (zone.top * height).toInt().coerceIn(0, height - 1)
+        val y1 = (zone.bottom * height).toInt().coerceIn(y0 + 1, height)
+
+        val zoneW = max(1, x1 - x0)
+        val zoneH = max(1, y1 - y0)
+        val stepX = max(1, zoneW / 8)
+        val stepY = max(1, zoneH / 8)
+
+        var sumR = 0.0
+        var sumG = 0.0
+        var sumB = 0.0
+        var weightSum = 0.0
+
+        for (y in y0 until y1 step stepY) {
+            val rowOffset = y * rowStride
+            for (x in x0 until x1 step stepX) {
+                val pixelOffset = rowOffset + x * pixelStride
+                if (pixelOffset + 3 > buffer.limit()) continue
+
+                val r = buffer.get(pixelOffset).toInt() and 0xFF
+                val g = buffer.get(pixelOffset + 1).toInt() and 0xFF
+                val b = buffer.get(pixelOffset + 2).toInt() and 0xFF
+
+                val maxVal = max(r, max(g, b))
+                if (maxVal < 4) continue // ignore absolute zero noise
+
+                val minVal = min(r, min(g, b))
+                val chroma = (maxVal - minVal) / 255.0f
+                val luma = (0.299f * r + 0.587f * g + 0.114f * b) / 255.0f
+
+                // Chroma-weighted importance formula
+                val weight = 0.35 + luma + (chroma * 2.0)
+
+                sumR += r * weight
+                sumG += g * weight
+                sumB += b * weight
+                weightSum += weight
+            }
+        }
+
+        var outR: Float
+        var outG: Float
+        var outB: Float
+
+        val blackCutoff = calibration.blackThreshold.coerceIn(0, 50).toFloat()
+
+        if (weightSum < 0.001) {
+            outR = 0f
+            outG = 0f
+            outB = 0f
+        } else {
+            outR = (sumR / weightSum).toFloat()
+            outG = (sumG / weightSum).toFloat()
+            outB = (sumB / weightSum).toFloat()
+
+            // Check black cutoff threshold
+            val rawIntensity = max(outR, max(outG, outB))
+            if (rawIntensity <= blackCutoff) {
                 outR = 0f
                 outG = 0f
                 outB = 0f
             } else {
-                outR = (sumR / weightSum).toFloat()
-                outG = (sumG / weightSum).toFloat()
-                outB = (sumB / weightSum).toFloat()
+                val gammaR = calibration.gammaR.coerceIn(0.5f, 2.5f)
+                val gammaG = calibration.gammaG.coerceIn(0.5f, 2.5f)
+                val gammaB = calibration.gammaB.coerceIn(0.5f, 2.5f)
+                val contrast = calibration.contrast.coerceIn(0.5f, 1.5f)
+                val sat = calibration.saturation.coerceIn(0.5f, 3.0f)
+                val gR = calibration.gainR.coerceIn(0.2f, 2.5f)
+                val gG = calibration.gainG.coerceIn(0.2f, 2.5f)
+                val gB = calibration.gainB.coerceIn(0.2f, 2.5f)
+                val maxBrightness = calibration.maxBrightness.coerceIn(0, 255)
 
-                // Check black cutoff threshold
-                val rawIntensity = max(outR, max(outG, outB))
-                if (rawIntensity <= blackCutoff) {
-                    outR = 0f
-                    outG = 0f
-                    outB = 0f
-                } else {
-                    // 1. Apply Gamma Curves
-                    if (gammaR != 1.0f) outR = 255f * (outR / 255f).pow(gammaR)
-                    if (gammaG != 1.0f) outG = 255f * (outG / 255f).pow(gammaG)
-                    if (gammaB != 1.0f) outB = 255f * (outB / 255f).pow(gammaB)
+                // 1. Apply Gamma Curves
+                if (gammaR != 1.0f) outR = 255f * (outR / 255f).pow(gammaR)
+                if (gammaG != 1.0f) outG = 255f * (outG / 255f).pow(gammaG)
+                if (gammaB != 1.0f) outB = 255f * (outB / 255f).pow(gammaB)
 
-                    // 2. Contrast adjustment (around midpoint 128)
-                    if (contrast != 1.0f) {
-                        outR = 128f + (outR - 128f) * contrast
-                        outG = 128f + (outG - 128f) * contrast
-                        outB = 128f + (outB - 128f) * contrast
-                    }
+                // 2. Contrast adjustment (around midpoint 128)
+                if (contrast != 1.0f) {
+                    outR = 128f + (outR - 128f) * contrast
+                    outG = 128f + (outG - 128f) * contrast
+                    outB = 128f + (outB - 128f) * contrast
+                }
 
-                    // 3. Saturation boost
-                    if (sat != 1.0f) {
-                        val gray = 0.299f * outR + 0.587f * outG + 0.114f * outB
-                        outR = gray + (outR - gray) * sat
-                        outG = gray + (outG - gray) * sat
-                        outB = gray + (outB - gray) * sat
-                    }
+                // 3. Saturation boost
+                if (sat != 1.0f) {
+                    val gray = 0.299f * outR + 0.587f * outG + 0.114f * outB
+                    outR = gray + (outR - gray) * sat
+                    outG = gray + (outG - gray) * sat
+                    outB = gray + (outB - gray) * sat
+                }
 
-                    // 4. Channel RGB gains
-                    outR *= gR
-                    outG *= gG
-                    outB *= gB
+                // 4. Channel RGB gains
+                outR *= gR
+                outG *= gG
+                outB *= gB
 
-                    // 5. Master brightness scaling
-                    if (maxBrightness < 255) {
-                        val scale = maxBrightness / 255f
-                        outR *= scale
-                        outG *= scale
-                        outB *= scale
-                    }
+                // 5. Master brightness scaling
+                if (maxBrightness < 255) {
+                    val scale = maxBrightness / 255f
+                    outR *= scale
+                    outG *= scale
+                    outB *= scale
                 }
             }
-
-            val outIdx = i * 3
-            rawRgbBuffer[outIdx] = outR.roundToInt().coerceIn(0, 255).toByte()
-            rawRgbBuffer[outIdx + 1] = outG.roundToInt().coerceIn(0, 255).toByte()
-            rawRgbBuffer[outIdx + 2] = outB.roundToInt().coerceIn(0, 255).toByte()
         }
 
-        // Apply temporal EMA smoothing
-        smoothingFilter.apply(
-            rawRgbBuffer,
-            ledCount,
-            calibration.smoothingFactor,
-            outputRgb
+        return byteArrayOf(
+            outR.roundToInt().coerceIn(0, 255).toByte(),
+            outG.roundToInt().coerceIn(0, 255).toByte(),
+            outB.roundToInt().coerceIn(0, 255).toByte()
         )
-
-        return true
     }
 
     /**
@@ -249,7 +359,6 @@ class ScreenColorProcessor {
         rowStride: Int,
         pixelStride: Int
     ) {
-        // Multi-point probe columns across screen width (10% to 90%)
         val probeX = intArrayOf(
             (width * 0.10f).toInt(),
             (width * 0.20f).toInt(),
@@ -262,11 +371,10 @@ class ScreenColorProcessor {
             (width * 0.90f).toInt()
         )
 
-        val maxScanRows = (height * 0.30f).toInt() // Scan up to 30% height for bars
+        val maxScanRows = (height * 0.30f).toInt()
         var foundTop = 0
         var foundBottom = 0
 
-        // Scan from top down: A row is black if ALL probe columns are black
         for (y in 0 until maxScanRows) {
             var rowHasPicture = false
             val rowOffset = y * rowStride
@@ -283,7 +391,6 @@ class ScreenColorProcessor {
             }
         }
 
-        // Scan from bottom up: A row is black if ALL probe columns are black
         for (y in (height - 1) downTo (height - maxScanRows)) {
             var rowHasPicture = false
             val rowOffset = y * rowStride
@@ -303,17 +410,13 @@ class ScreenColorProcessor {
         val topCropPct = (foundTop.toFloat() / height).coerceIn(0f, 0.25f)
         val bottomCropPct = (foundBottom.toFloat() / height).coerceIn(0f, 0.25f)
 
-        // Ignore whole-screen blackouts (e.g. scene transitions) where no content was found at all
         if (foundTop == 0 && foundBottom == 0 && topCropPct == 0f && bottomCropPct == 0f) {
-            // Check if center of screen is also completely black
             val centerOffset = (height / 2) * rowStride + (width / 2) * pixelStride
             if (!isPixelNonBlack(buffer, centerOffset)) {
-                // Entire screen is dark/black; retain current detected crop to avoid bouncing
                 return
             }
         }
 
-        // Stability filtering (3 consecutive frames)
         if (Math.abs(topCropPct - candidateTopCrop) < 0.015f && Math.abs(bottomCropPct - candidateBottomCrop) < 0.015f) {
             stableFrameCount++
             if (stableFrameCount >= 3) {
@@ -332,7 +435,6 @@ class ScreenColorProcessor {
         val r = buffer.get(offset).toInt() and 0xFF
         val g = buffer.get(offset + 1).toInt() and 0xFF
         val b = buffer.get(offset + 2).toInt() and 0xFF
-        // Consider pixel non-black if brightness exceeds threshold 16
         return (r > 16 || g > 16 || b > 16)
     }
 }

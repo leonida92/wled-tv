@@ -34,7 +34,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
-                android:text="Configure network connection, capture performance, and startup behavior"
+                android:text="Configure capture performance, startup behavior, and application updates"
                 style="@style/TvBody" />
         </LinearLayout>
 
@@ -81,107 +81,7 @@
             android:layout_height="wrap_content"
             android:orientation="vertical">
 
-            <!-- Card 1: WLED IP Address & Connection -->
-            <LinearLayout
-                android:id="@+id/itemIpSetting"
-                style="@style/TvSettingItem"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
-
-                <ImageView
-                    android:layout_width="32dp"
-                    android:layout_height="32dp"
-                    android:src="@drawable/ic_wled"
-                    app:tint="@color/accent_cyan" />
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="20dp"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/pref_wled_ip"
-                        style="@style/TvSettingTitle" />
-
-                    <TextView
-                        android:id="@+id/tvSystemIpValue"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
-                        android:text="192.168.1.66:21324"
-                        android:textColor="@color/accent_cyan"
-                        android:textSize="15sp"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/pref_wled_ip_desc"
-                        style="@style/TvSettingSub" />
-                </LinearLayout>
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="[OK] Change IP"
-                    android:textColor="@color/accent_blue"
-                    android:textSize="13sp"
-                    android:textStyle="bold" />
-            </LinearLayout>
-
-            <!-- Card 2: LAN mDNS Auto-Discovery -->
-            <LinearLayout
-                android:id="@+id/itemScanLan"
-                style="@style/TvSettingItem"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
-
-                <ImageView
-                    android:layout_width="32dp"
-                    android:layout_height="32dp"
-                    android:src="@drawable/ic_settings"
-                    app:tint="@color/accent_blue" />
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="20dp"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/btn_scan_lan"
-                        style="@style/TvSettingTitle" />
-
-                    <TextView
-                        android:id="@+id/tvScanStatus"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Auto-discover WLED devices broadcasting on local Wi-Fi / Ethernet"
-                        style="@style/TvSettingSub" />
-                </LinearLayout>
-
-                <TextView
-                    android:id="@+id/tvScanActionText"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="[OK] Start Scan"
-                    android:textColor="@color/accent_cyan"
-                    android:textSize="13sp"
-                    android:textStyle="bold" />
-            </LinearLayout>
-
-            <!-- Card 3: Capture Frame Rate -->
+            <!-- Card 1: Capture Frame Rate -->
             <LinearLayout
                 android:id="@+id/itemFpsSetting"
                 style="@style/TvSettingItem"
@@ -239,7 +139,7 @@
                     app:tint="@color/accent_blue" />
             </LinearLayout>
 
-            <!-- Card 4: Auto-Start on Boot -->
+            <!-- Card 2: Auto-Start on Boot -->
             <LinearLayout
                 android:id="@+id/itemAutoStartSetting"
                 style="@style/TvSettingItem"
@@ -289,7 +189,7 @@
                     android:textStyle="bold" />
             </LinearLayout>
 
-            <!-- Card 5: Check for Updates -->
+            <!-- Card 3: Check for Updates -->
             <LinearLayout
                 android:id="@+id/itemCheckUpdateSetting"
                 style="@style/TvSettingItem"

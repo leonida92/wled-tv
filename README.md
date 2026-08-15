@@ -7,36 +7,44 @@
 
 **WLED TV** is a native, ultra-low-latency ambient bias lighting application designed specifically for **Google TV Streamer**, **Chromecast with Google TV**, and **Android TV** devices.
 
-It captures on-screen video in real time, extracts rich chroma-weighted edge colors, and streams them directly over your local Wi-Fi/Ethernet network to any [WLED](https://kno.wled.ge/) addressable LED strip using low-overhead **UDP DRGB** packets (no Raspberry Pi, capture card, or Hyperion server required).
+It captures on-screen video in real time, extracts rich chroma-weighted edge and ambient colors, and streams them concurrently over your local Wi-Fi/Ethernet network to multiple [WLED](https://kno.wled.ge/) addressable LED strips and fixtures using low-overhead **UDP DRGB** packets (no Raspberry Pi, capture card, or Hyperion server required).
 
 ---
 
 ## Features
 
-- **Optimized for TV and Remote Navigation**: Full 10-foot Leanback UI with smooth D-pad remote navigation, visual focus feedback, and overscan protection.
+- **Multi-Device Fleet Streaming**:
+  - Stream ambient lighting simultaneously to multiple WLED controllers and fixtures across your room with zero latency penalty.
+  - Assign distinct screen sampling zones to each device: **TV Backlight (Perimeter)**, **Left Lamp / Lightbar**, **Right Lamp / Lightbar**, **Top / Ceiling Uplight**, **Bottom / Floor Light**, **Full Screen Ambient (Flood)**, or **Custom Screen Region**.
+- **Dedicated Light Setup & Device Manager**:
+  - Full management of your lighting fleet: Add, Configure, Identify (blink test), Toggle ON/OFF with hardware sleep/wake, and Delete devices.
+  - One-click local mDNS network auto-discovery for instant WLED detection.
+- **Per-Device Color & Optical Calibration**:
+  - Fine-tune every fixture independently to match its optical and physical placement:
+    - **Max Brightness Capping**: Balance bright room lamps against TV backlights.
+    - **RGB White Balance Gains & Gamma**: Correct warm vs cool white LED phosphors.
+    - **Color Order**: Independent mapping (RGB, GRB, BGR, etc.) per controller.
+    - **Transition Smoothing (EMA Filter)**: Custom transition speed per light.
+    - **Saturation & Contrast Multipliers**: Boost vividness independently.
+- **Dynamic Auto-Letterbox Detection**:
+  - Real-time continuous black-bar detection that automatically shifts the sampling borders inward directly onto the active movie frame when watching widescreen or Cinemascope content.
 - **Interactive 4-Edge Perimeter Calibration**:
   - Live on-screen zone canvas showing real-time LED sampling rectangles.
   - Independently adjust **Top**, **Bottom**, **Left**, and **Right** border insets (0% - 40%) directly with the TV remote.
-- **Movie Aspect Ratio Presets and Squeezed Side Zones**:
+- **Movie Aspect Ratio Presets**:
   - One-click presets for **16:9 Fullscreen**, **2.39:1 Cinemascope**, **2.35:1 Widescreen**, **2.00:1 Univisium (Netflix)**, **1.85:1 Theatrical Flat**, and **4:3 Pillarbox**.
-  - **No Black Bar Sampling**: Left and Right LED zones are automatically squeezed into the active movie window so black letterbox bars are never sampled.
 - **Live Color and Gain Calibration**:
   - **On-Screen Reference Test Colors**: Illuminate your TV edges with solid **6500K Pure White**, **3200K Warm White**, **Red**, **Green**, **Blue**, **Cyan**, **Magenta**, or **Yellow** to visually match TV screen colors against LED wall reflections.
   - **Chroma-Weighted Sampling**: Boosts vibrant foreground colors over washed-out backgrounds.
   - **Black Level Cutoff Threshold (0 - 50)**: Turn LEDs completely OFF (R=0, G=0, B=0) in dark scenes instead of emitting faint gray glow.
-  - **Individual RGB Gains**: Fine-tune Red, Green, and Blue gain multipliers for accurate white balance.
-  - **Temporal Smoothing (EMA Filter)**: Fluid, flicker-free LED color transitions.
-- **Dedicated System and Connection Settings**:
-  - Direct WLED IP configuration with on-screen live connection status pill.
-  - One-click local mDNS LAN auto-scan for WLED controllers.
-  - Selectable frame rate: **60 FPS** (Ultra Smooth), **30 FPS** (Balanced), **15 FPS** (Power Saver).
-  - Auto-start on TV boot option.
+- **16:9 Live LED Dashboard Simulation**:
+  - Live 16:9 TV chassis simulation rendering individual LED color dots in real-time.
 - **Ultra-Low Latency and High Performance**:
   - Downsampled GPU capture buffer (320 x 180) enables sub-millisecond edge processing.
   - Direct UDP DRGB packets on port 21324 with zero intermediate proxies.
   - Uses less than 2% CPU on modern TV streaming devices.
 - **HDMI CEC Standby and Instant Wake**:
-  - Automatically blacks out the LED strip when the TV is put into standby via the remote.
+  - Automatically blacks out all LED fixtures when the TV is put into standby via the remote.
   - Instantly resumes streaming colors on wake with zero reconnection delays or permission popups.
 - **100% Private and Local**:
   - Operates entirely on your local home network (LAN).
@@ -47,9 +55,9 @@ It captures on-screen video in real time, extracts rich chroma-weighted edge col
 ## Hardware and Software Requirements
 
 1. **Streaming Device**: Google TV Streamer, Chromecast with Google TV (4K / HD), Nvidia Shield TV, or any Android TV box running **Android 8.0+ (API 26+)**.
-2. **WLED Controller**: ESP32 or ESP8266 running [WLED firmware](https://install.wled.me/) connected to your local Wi-Fi or Ethernet.
+2. **WLED Controllers**: ESP32 or ESP8266 running [WLED firmware](https://install.wled.me/) connected to your local Wi-Fi or Ethernet.
    - *Ensure **Receive UDP realtime** is enabled in WLED -> Config -> Sync Interfaces*.
-3. **LED Strip**: WS2812B, SK6812, WS2815, or similar addressable RGB/RGBW strip mounted around the back perimeter of your TV.
+3. **LED Fixtures**: Addressable strips (WS2812B, SK6812, WS2815) or ambient lamps/bulbs.
 
 ---
 
@@ -60,34 +68,32 @@ It captures on-screen video in real time, extracts rich chroma-weighted edge col
 1. On your Google TV / Android TV:
    - Enable **Developer Options**: *Settings -> System -> About -> click 'Android TV OS build' 7 times*.
    - Enable **Network Debugging**: *Settings -> System -> Developer options -> Network debugging*.
-2. Connect from your computer (PowerShell, Terminal, or Command Prompt):
+2. Connect from your computer:
    ```bash
    adb connect <TV_IP_ADDRESS>:5555
-   adb install -r app/build/outputs/apk/debug/app-debug.apk
+   adb install -r app-release.apk
    ```
 
 ### Method 2: Sideload via USB or "Send Files to TV"
-1. Install **Send Files to TV** and a file manager (e.g. **AnExplorer** or **FX File Explorer**) from the Google TV Play Store.
-2. Send the compiled `.apk` to your TV and open it to install.
+1. Install **Send Files to TV** and a file manager from the Google TV Play Store.
+2. Send `app-release.apk` to your TV and open it to install.
 
 ---
 
 ## Quick Start Guide
 
 1. **Launch WLED TV** on your TV.
-2. **Configure Connection**:
-   - Open **System & Connection** to enter your WLED controller's IP address (e.g., `192.168.1.66`) or use **Scan LAN**.
-3. **Configure Strip Layout**:
-   - Open **Strip Geometry** and enter the LED counts for your **Top**, **Right**, **Bottom**, and **Left** edges.
-   - Select your **Start Corner** (where your ESP connects to the strip) and **Direction** (Clockwise / Counter-Clockwise).
-4. **Adjust Perimeter Zones and Aspect Ratios**:
-   - Open **Screen Zones & Crop** to align the capture sampling boxes with your screen borders or select a movie aspect ratio preset (**2.39:1 Cinemascope**, **16:9**, etc.).
-5. **Calibrate Colors**:
-   - Open **Color & Calibration** to tune saturation boost (default `1.6x`), brightness, black cutoff threshold, and RGB gains using the on-screen reference test colors.
-6. **Start Ambient Light**:
+2. **Setup Lights and Devices**:
+   - Open **Light Setup & Devices**.
+   - Use **Scan LAN for WLED** or click **+ Add Light** to add your fixtures.
+   - For your TV perimeter strip, click **Configure** -> **Configure Strip Perimeter** to set Top, Right, Bottom, and Left LED counts, Start Corner, and Wiring Direction.
+   - For side lamps, uplights, or room ambient fixtures, select the appropriate **Screen Region / Role** and calibrate color, brightness, and gains.
+3. **Adjust Perimeter Zones and Aspect Ratios**:
+   - Open **Screen Zones & Crop** to align capture sampling boxes or enable **Auto-Detect** for real-time letterbox tracking.
+4. **Start Ambient Light**:
    - Click **START AMBIENT** on the main dashboard.
    - When Android prompts for screen capture permission, select **Start now**.
-7. Enjoy real-time synchronized bias lighting with games, YouTube, Plex, Kodi, SmartTube, and local media.
+5. Enjoy real-time synchronized bias lighting with games, YouTube, Plex, Kodi, SmartTube, and local media.
 
 ---
 
@@ -114,7 +120,7 @@ adb shell settings put secure icon_blacklist cast,screen_record,screen_recording
 
 ## Privacy and DRM Notice
 
-- **Local Network Only**: All communication happens strictly between your TV streaming device and your WLED controller over your local LAN. No data is ever transmitted outside your network.
+- **Local Network Only**: All communication happens strictly between your TV streaming device and your WLED controllers over your local LAN. No data is ever transmitted outside your network.
 - **DRM Protected Video (Widevine L1)**: Commercial streaming apps (such as Netflix, Amazon Prime, and Disney+) enforce hardware DRM (`FLAG_SECURE`), which blanks the screen capture buffer for those specific video windows. Non-DRM content (YouTube, Plex, Jellyfin, Kodi, Moonlight game streaming, SmartTube, HDMI inputs, Twitch, and local videos) functions with full ambient illumination.
 
 ---
@@ -126,10 +132,14 @@ adb shell settings put secure icon_blacklist cast,screen_record,screen_recording
 git clone https://github.com/leonida92/wled-tv.git
 cd wled-tv
 
-# Build Debug APK using Gradle (Requires JDK 17)
+# Build Signed Release APK using Gradle (Requires JDK 17)
+./gradlew assembleRelease
+
+# Build Debug APK
 ./gradlew assembleDebug
 
-# Output APK located at:
+# Output APKs located at:
+# app/build/outputs/apk/release/app-release.apk
 # app/build/outputs/apk/debug/app-debug.apk
 ```
 

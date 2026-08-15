@@ -132,7 +132,11 @@ class ZoneEditorActivity : AppCompatActivity() {
 
     private fun toggleAutoDetect() {
         val current = config.perimeter.autoLetterbox
-        config = config.copy(perimeter = config.perimeter.copy(autoLetterbox = !current))
+        val newAuto = !current
+        val updatedDevices = config.devices.map { dev ->
+            dev.copy(perimeter = dev.perimeter.copy(autoLetterbox = newAuto))
+        }
+        config = config.copy(devices = updatedDevices)
         saveAndUpdate()
     }
 
@@ -149,27 +153,40 @@ class ZoneEditorActivity : AppCompatActivity() {
     }
 
     private fun resetToAspectPreset(preset: AspectRatioPreset) {
-        val p = config.perimeter.copy(
-            topCrop = preset.topCrop,
-            bottomCrop = preset.bottomCrop,
-            leftCrop = preset.leftCrop,
-            rightCrop = preset.rightCrop,
-            autoLetterbox = false
-        )
-        config = config.copy(perimeter = p)
+        val updatedDevices = config.devices.map { dev ->
+            dev.copy(
+                perimeter = dev.perimeter.copy(
+                    topCrop = preset.topCrop,
+                    bottomCrop = preset.bottomCrop,
+                    leftCrop = preset.leftCrop,
+                    rightCrop = preset.rightCrop,
+                    autoLetterbox = false
+                )
+            )
+        }
+        config = config.copy(devices = updatedDevices)
         saveAndUpdate()
     }
 
     private fun adjustActiveBorder(delta: Float) {
         val p = config.perimeter
-        val updatedPerimeter = when (activeBorder) {
-            ActiveBorder.TOP -> p.copy(topCrop = (p.topCrop + delta).coerceIn(0f, 0.40f), autoLetterbox = false)
-            ActiveBorder.BOTTOM -> p.copy(bottomCrop = (p.bottomCrop + delta).coerceIn(0f, 0.40f), autoLetterbox = false)
-            ActiveBorder.LEFT -> p.copy(leftCrop = (p.leftCrop + delta).coerceIn(0f, 0.40f), autoLetterbox = false)
-            ActiveBorder.RIGHT -> p.copy(rightCrop = (p.rightCrop + delta).coerceIn(0f, 0.40f), autoLetterbox = false)
-            ActiveBorder.NONE -> p
+        val newTop = if (activeBorder == ActiveBorder.TOP) (p.topCrop + delta).coerceIn(0f, 0.40f) else p.topCrop
+        val newBottom = if (activeBorder == ActiveBorder.BOTTOM) (p.bottomCrop + delta).coerceIn(0f, 0.40f) else p.bottomCrop
+        val newLeft = if (activeBorder == ActiveBorder.LEFT) (p.leftCrop + delta).coerceIn(0f, 0.40f) else p.leftCrop
+        val newRight = if (activeBorder == ActiveBorder.RIGHT) (p.rightCrop + delta).coerceIn(0f, 0.40f) else p.rightCrop
+
+        val updatedDevices = config.devices.map { dev ->
+            dev.copy(
+                perimeter = dev.perimeter.copy(
+                    topCrop = newTop,
+                    bottomCrop = newBottom,
+                    leftCrop = newLeft,
+                    rightCrop = newRight,
+                    autoLetterbox = false
+                )
+            )
         }
-        config = config.copy(perimeter = updatedPerimeter)
+        config = config.copy(devices = updatedDevices)
         saveAndUpdate()
     }
 

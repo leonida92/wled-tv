@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_card"
+    android:focusable="false"
+    android:clickable="false"
+    android:descendantFocusability="afterDescendants"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:padding="16dp"
+    android:layout_marginBottom="10dp">
+
+    <!-- Status Indicator Dot -->
+    <View
+        android:id="@+id/viewDeviceStatusDot"
+        android:layout_width="12dp"
+        android:layout_height="12dp"
+        android:layout_marginEnd="14dp"
+        android:background="@drawable/bg_status_dot" />
+
+    <!-- Info Column -->
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/tvDeviceName"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="TV Backlight"
+                android:textColor="@color/text_primary"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tvDeviceTypeBadge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="10dp"
+                android:background="@drawable/bg_card_focused"
+                android:paddingStart="8dp"
+                android:paddingTop="2dp"
+                android:paddingEnd="8dp"
+                android:paddingBottom="2dp"
+                android:text="Perimeter"
+                android:textColor="@color/accent_cyan"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tvDeviceDetails"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="3dp"
+            android:text="192.168.1.66:21324 | 168 LEDs | RGB"
+            android:textColor="@color/text_muted"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <!-- Action Buttons -->
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <!-- Identify / Test Button -->
+        <Button
+            android:id="@+id/btnTestDevice"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:layout_marginEnd="8dp"
+            android:background="@drawable/bg_card_selector"
+            android:focusable="true"
+            android:focusableInTouchMode="true"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:text="Identify"
+            android:textColor="@color/accent_cyan"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <!-- Configure Button -->
+        <Button
+            android:id="@+id/btnEditDevice"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:layout_marginEnd="8dp"
+            android:background="@drawable/bg_card_selector"
+            android:focusable="true"
+            android:focusableInTouchMode="true"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:text="Configure"
+            android:textColor="@color/text_primary"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <!-- Toggle Enable/Disable Button -->
+        <Button
+            android:id="@+id/btnToggleDevice"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:layout_marginEnd="8dp"
+            android:background="@drawable/bg_card_selector"
+            android:focusable="true"
+            android:focusableInTouchMode="true"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:text="ON"
+            android:textColor="@color/accent_green"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <!-- Delete Button -->
+        <ImageButton
+            android:id="@+id/btnDeleteDevice"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="@drawable/bg_card_selector"
+            android:focusable="true"
+            android:focusableInTouchMode="true"
+            android:src="@drawable/ic_delete"
+            app:tint="@color/accent_red"
+            android:contentDescription="Delete Light" />
+    </LinearLayout>
+
+</LinearLayout>

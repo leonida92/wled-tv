@@ -11,8 +11,8 @@ android {
         applicationId = "com.wled.tv"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.0.1"
+        versionCode = 3
+        versionName = "1.1.0"
 
         vectorDrawables {
             useSupportLibrary = true
@@ -54,6 +54,14 @@ android {
     }
     buildFeatures {
         buildConfig = true
+    }
+
+    applicationVariants.all {
+        outputs.all {
+            if (this is com.android.build.gradle.internal.api.BaseVariantOutputImpl) {
+                outputFileName = "wled-tv-v${versionName}-${name}.apk"
+            }
+        }
     }
 }
 

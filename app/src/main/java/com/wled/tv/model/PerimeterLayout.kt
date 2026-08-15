@@ -41,7 +41,7 @@ data class PerimeterConfig(
     val bottomCrop: Float = 0.0f,
     val leftCrop: Float = 0.0f,
     val rightCrop: Float = 0.0f,
-    val autoLetterbox: Boolean = false
+    val autoLetterbox: Boolean = true
 ) {
     val totalLeds: Int
         get() = topLeds + rightLeds + bottomLeds + leftLeds

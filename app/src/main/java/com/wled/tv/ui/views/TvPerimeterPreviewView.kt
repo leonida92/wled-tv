@@ -11,6 +11,7 @@ import android.view.View
 import com.wled.tv.model.Corner
 import com.wled.tv.model.Direction
 import com.wled.tv.model.PerimeterConfig
+import com.wled.tv.model.WledDevice
 import kotlin.math.min
 
 class TvPerimeterPreviewView @JvmOverloads constructor(
@@ -19,9 +20,9 @@ class TvPerimeterPreviewView @JvmOverloads constructor(
     defStyleAttr: Int = 0
 ) : View(context, attrs, defStyleAttr) {
 
-    private var perimeterConfig = PerimeterConfig()
-    private var liveLedColors: ByteArray? = null
-    private var liveLedCount: Int = 0
+    private var devices: List<WledDevice> = emptyList()
+    private val deviceColors = HashMap<String, ByteArray>()
+    private val deviceCounts = HashMap<String, Int>()
 
     private val tvBodyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#0F172A")
@@ -54,18 +55,35 @@ class TvPerimeterPreviewView @JvmOverloads constructor(
         style = Paint.Style.FILL
     }
 
-    fun updateConfig(config: PerimeterConfig) {
-        this.perimeterConfig = config
+    fun updateDevices(devices: List<WledDevice>) {
+        this.devices = devices
         invalidate()
     }
 
-    fun updateLiveColors(rgb: ByteArray, count: Int) {
-        if (this.liveLedColors == null || this.liveLedColors!!.size != rgb.size) {
-            this.liveLedColors = ByteArray(rgb.size)
+    fun updateConfig(config: PerimeterConfig) {
+        // Legacy single-config support
+        if (devices.isEmpty()) {
+            this.devices = listOf(WledDevice(perimeter = config))
+        } else {
+            this.devices = listOf(devices[0].copy(perimeter = config)) + devices.drop(1)
         }
-        System.arraycopy(rgb, 0, this.liveLedColors!!, 0, min(rgb.size, count * 3))
-        this.liveLedCount = count
+        invalidate()
+    }
+
+    fun updateDeviceLiveColors(deviceId: String, rgb: ByteArray, count: Int) {
+        var buf = deviceColors[deviceId]
+        if (buf == null || buf.size != rgb.size) {
+            buf = ByteArray(rgb.size)
+            deviceColors[deviceId] = buf
+        }
+        System.arraycopy(rgb, 0, buf, 0, min(rgb.size, count * 3))
+        deviceCounts[deviceId] = count
         postInvalidateOnAnimation()
+    }
+
+    fun updateLiveColors(rgb: ByteArray, count: Int) {
+        val primaryId = devices.firstOrNull()?.id ?: "primary"
+        updateDeviceLiveColors(primaryId, rgb, count)
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -75,14 +93,33 @@ class TvPerimeterPreviewView @JvmOverloads constructor(
         val h = height.toFloat()
         if (w <= 0 || h <= 0) return
 
-        val padX = w * 0.08f
-        val padY = h * 0.08f
+        val activeDevices = devices.filter { it.enabled }.ifEmpty { devices.take(1) }
+        val deviceCount = activeDevices.size.coerceAtLeast(1)
 
-        val tvRect = RectF(padX, padY, w - padX, h - padY)
-        val tvWidth = tvRect.width()
-        val tvHeight = tvRect.height()
+        // Scale padding based on number of devices so all offset strips fit comfortably
+        val paddingScale = (0.84f - (deviceCount - 1) * 0.05f).coerceIn(0.68f, 0.86f)
+        val availW = w * paddingScale
+        val availH = h * paddingScale
 
-        // Draw TV chassis / screen
+        val targetRatio = 16f / 9f
+        val currentRatio = availW / availH
+
+        val tvWidth: Float
+        val tvHeight: Float
+
+        if (currentRatio > targetRatio) {
+            tvHeight = availH
+            tvWidth = tvHeight * targetRatio
+        } else {
+            tvWidth = availW
+            tvHeight = tvWidth / targetRatio
+        }
+
+        val left = (w - tvWidth) / 2f
+        val top = (h - tvHeight) / 2f
+        val tvRect = RectF(left, top, left + tvWidth, top + tvHeight)
+
+        // Draw TV chassis / screen (16:9)
         canvas.drawRoundRect(tvRect, 12f, 12f, tvBodyPaint)
         canvas.drawRoundRect(tvRect, 12f, 12f, tvBezelPaint)
 
@@ -95,122 +132,146 @@ class TvPerimeterPreviewView @JvmOverloads constructor(
         )
         canvas.drawRoundRect(screenRect, 8f, 8f, tvScreenPaint)
 
-        // Draw LED perimeter dots around the outer border
-        val topLeds = perimeterConfig.topLeds
-        val rightLeds = perimeterConfig.rightLeds
-        val bottomLeds = perimeterConfig.bottomLeds
-        val leftLeds = perimeterConfig.leftLeds
-        val totalLeds = perimeterConfig.totalLeds
+        val ledRadius = min(tvWidth, tvHeight) * 0.015f
 
-        if (totalLeds <= 0) return
+        // Draw each device's LED strip with outward offset for secondary devices
+        for ((deviceIndex, device) in activeDevices.withIndex()) {
+            val perimeterConfig = device.getEffectivePerimeter()
+            val totalLeds = perimeterConfig.totalLeds
+            if (totalLeds <= 0) continue
 
-        val ledRadius = min(tvWidth, tvHeight) * 0.016f
+            val colors = deviceColors[device.id]
+            val liveCount = deviceCounts[device.id] ?: 0
 
-        fun getLedColor(index: Int): Int {
-            val colors = liveLedColors
-            if (colors != null && index < liveLedCount && (index * 3 + 2) < colors.size) {
-                val r = colors[index * 3].toInt() and 0xFF
-                val g = colors[index * 3 + 1].toInt() and 0xFF
-                val b = colors[index * 3 + 2].toInt() and 0xFF
-                return Color.rgb(r, g, b)
+            fun getLedColor(index: Int): Int {
+                if (colors != null && index < liveCount && (index * 3 + 2) < colors.size) {
+                    val r = colors[index * 3].toInt() and 0xFF
+                    val g = colors[index * 3 + 1].toInt() and 0xFF
+                    val b = colors[index * 3 + 2].toInt() and 0xFF
+                    return Color.rgb(r, g, b)
+                }
+                return if (deviceIndex == 0) Color.parseColor("#3B82F6") else Color.parseColor("#00E5FF")
             }
-            return Color.parseColor("#3B82F6")
-        }
 
-        // 1. Calculate physical dot coordinates for each edge (ordered clockwise)
-        val topPoints = ArrayList<PointF>(topLeds)
-        if (topLeds > 0) {
-            val step = (tvRect.width() - (ledRadius * 4)) / topLeds
-            for (i in 0 until topLeds) {
-                val cx = tvRect.left + (ledRadius * 2) + (i * step) + (step / 2)
-                val cy = tvRect.top - (ledRadius * 1.5f)
-                topPoints.add(PointF(cx, cy))
+            val offset = deviceIndex * (ledRadius * 3.5f)
+
+            val topLeds = perimeterConfig.topLeds
+            val rightLeds = perimeterConfig.rightLeds
+            val bottomLeds = perimeterConfig.bottomLeds
+            val leftLeds = perimeterConfig.leftLeds
+
+            // 1. Calculate physical dot coordinates for each edge with device offset
+            val topPoints = ArrayList<PointF>(topLeds)
+            if (topLeds > 0) {
+                val cy = tvRect.top - (ledRadius * 1.6f) - offset
+                if (topLeds == 1) {
+                    topPoints.add(PointF(tvRect.centerX(), cy))
+                } else {
+                    val step = (tvRect.width() - (ledRadius * 4)) / topLeds
+                    for (i in 0 until topLeds) {
+                        val cx = tvRect.left + (ledRadius * 2) + (i * step) + (step / 2)
+                        topPoints.add(PointF(cx, cy))
+                    }
+                }
+            }
+
+            val rightPoints = ArrayList<PointF>(rightLeds)
+            if (rightLeds > 0) {
+                val cx = tvRect.right + (ledRadius * 1.6f) + offset
+                if (rightLeds == 1) {
+                    rightPoints.add(PointF(cx, tvRect.centerY()))
+                } else {
+                    val step = (tvRect.height() - (ledRadius * 4)) / rightLeds
+                    for (i in 0 until rightLeds) {
+                        val cy = tvRect.top + (ledRadius * 2) + (i * step) + (step / 2)
+                        rightPoints.add(PointF(cx, cy))
+                    }
+                }
+            }
+
+            val bottomPoints = ArrayList<PointF>(bottomLeds)
+            if (bottomLeds > 0) {
+                val cy = tvRect.bottom + (ledRadius * 1.6f) + offset
+                if (bottomLeds == 1) {
+                    bottomPoints.add(PointF(tvRect.centerX(), cy))
+                } else {
+                    val step = (tvRect.width() - (ledRadius * 4)) / bottomLeds
+                    for (i in 0 until bottomLeds) {
+                        val cx = tvRect.right - (ledRadius * 2) - (i * step) - (step / 2)
+                        bottomPoints.add(PointF(cx, cy))
+                    }
+                }
+            }
+
+            val leftPoints = ArrayList<PointF>(leftLeds)
+            if (leftLeds > 0) {
+                val cx = tvRect.left - (ledRadius * 1.6f) - offset
+                if (leftLeds == 1) {
+                    leftPoints.add(PointF(cx, tvRect.centerY()))
+                } else {
+                    val step = (tvRect.height() - (ledRadius * 4)) / leftLeds
+                    for (i in 0 until leftLeds) {
+                        val cy = tvRect.bottom - (ledRadius * 2) - (i * step) - (step / 2)
+                        leftPoints.add(PointF(cx, cy))
+                    }
+                }
+            }
+
+            // 2. Assemble ordered points matching device's startCorner
+            val clockwisePoints = ArrayList<PointF>(totalLeds)
+            when (perimeterConfig.startCorner) {
+                Corner.BOTTOM_LEFT -> {
+                    clockwisePoints.addAll(leftPoints)
+                    clockwisePoints.addAll(topPoints)
+                    clockwisePoints.addAll(rightPoints)
+                    clockwisePoints.addAll(bottomPoints)
+                }
+                Corner.TOP_LEFT -> {
+                    clockwisePoints.addAll(topPoints)
+                    clockwisePoints.addAll(rightPoints)
+                    clockwisePoints.addAll(bottomPoints)
+                    clockwisePoints.addAll(leftPoints)
+                }
+                Corner.TOP_RIGHT -> {
+                    clockwisePoints.addAll(rightPoints)
+                    clockwisePoints.addAll(bottomPoints)
+                    clockwisePoints.addAll(leftPoints)
+                    clockwisePoints.addAll(topPoints)
+                }
+                Corner.BOTTOM_RIGHT -> {
+                    clockwisePoints.addAll(bottomPoints)
+                    clockwisePoints.addAll(leftPoints)
+                    clockwisePoints.addAll(topPoints)
+                    clockwisePoints.addAll(rightPoints)
+                }
+            }
+
+            val finalPoints = if (perimeterConfig.direction == Direction.CLOCKWISE) {
+                clockwisePoints
+            } else {
+                clockwisePoints.reversed()
+            }
+
+            // 3. Draw each LED dot with its live color
+            for (i in 0 until finalPoints.size) {
+                val pt = finalPoints[i]
+                ledPaint.color = getLedColor(i)
+                canvas.drawCircle(pt.x, pt.y, ledRadius, ledPaint)
+                canvas.drawCircle(pt.x, pt.y, ledRadius, ledBorderPaint)
+            }
+
+            // Draw start corner marker for primary device or multi-edge strips
+            if (deviceIndex == 0 && totalLeds > 1) {
+                val cornerX = when (perimeterConfig.startCorner) {
+                    Corner.TOP_LEFT, Corner.BOTTOM_LEFT -> tvRect.left
+                    Corner.TOP_RIGHT, Corner.BOTTOM_RIGHT -> tvRect.right
+                }
+                val cornerY = when (perimeterConfig.startCorner) {
+                    Corner.TOP_LEFT, Corner.TOP_RIGHT -> tvRect.top
+                    Corner.BOTTOM_LEFT, Corner.BOTTOM_RIGHT -> tvRect.bottom
+                }
+                canvas.drawCircle(cornerX, cornerY, ledRadius * 1.6f, cornerIndicatorPaint)
             }
         }
-
-        val rightPoints = ArrayList<PointF>(rightLeds)
-        if (rightLeds > 0) {
-            val step = (tvRect.height() - (ledRadius * 4)) / rightLeds
-            for (i in 0 until rightLeds) {
-                val cx = tvRect.right + (ledRadius * 1.5f)
-                val cy = tvRect.top + (ledRadius * 2) + (i * step) + (step / 2)
-                rightPoints.add(PointF(cx, cy))
-            }
-        }
-
-        val bottomPoints = ArrayList<PointF>(bottomLeds)
-        if (bottomLeds > 0) {
-            val step = (tvRect.width() - (ledRadius * 4)) / bottomLeds
-            for (i in 0 until bottomLeds) {
-                val cx = tvRect.right - (ledRadius * 2) - (i * step) - (step / 2)
-                val cy = tvRect.bottom + (ledRadius * 1.5f)
-                bottomPoints.add(PointF(cx, cy))
-            }
-        }
-
-        val leftPoints = ArrayList<PointF>(leftLeds)
-        if (leftLeds > 0) {
-            val step = (tvRect.height() - (ledRadius * 4)) / leftLeds
-            for (i in 0 until leftLeds) {
-                val cx = tvRect.left - (ledRadius * 1.5f)
-                val cy = tvRect.bottom - (ledRadius * 2) - (i * step) - (step / 2)
-                leftPoints.add(PointF(cx, cy))
-            }
-        }
-
-        // 2. Assemble the ordered LED points matching the user's startCorner
-        val clockwisePoints = ArrayList<PointF>(totalLeds)
-        when (perimeterConfig.startCorner) {
-            Corner.BOTTOM_LEFT -> {
-                clockwisePoints.addAll(leftPoints)
-                clockwisePoints.addAll(topPoints)
-                clockwisePoints.addAll(rightPoints)
-                clockwisePoints.addAll(bottomPoints)
-            }
-            Corner.TOP_LEFT -> {
-                clockwisePoints.addAll(topPoints)
-                clockwisePoints.addAll(rightPoints)
-                clockwisePoints.addAll(bottomPoints)
-                clockwisePoints.addAll(leftPoints)
-            }
-            Corner.TOP_RIGHT -> {
-                clockwisePoints.addAll(rightPoints)
-                clockwisePoints.addAll(bottomPoints)
-                clockwisePoints.addAll(leftPoints)
-                clockwisePoints.addAll(topPoints)
-            }
-            Corner.BOTTOM_RIGHT -> {
-                clockwisePoints.addAll(bottomPoints)
-                clockwisePoints.addAll(leftPoints)
-                clockwisePoints.addAll(topPoints)
-                clockwisePoints.addAll(rightPoints)
-            }
-        }
-
-        // 3. Reverse if counter-clockwise to match physical wiring
-        val finalPoints = if (perimeterConfig.direction == Direction.CLOCKWISE) {
-            clockwisePoints
-        } else {
-            clockwisePoints.reversed()
-        }
-
-        // 4. Draw each preview dot at its true mapped index
-        for (i in 0 until finalPoints.size) {
-            val pt = finalPoints[i]
-            ledPaint.color = getLedColor(i)
-            canvas.drawCircle(pt.x, pt.y, ledRadius, ledPaint)
-            canvas.drawCircle(pt.x, pt.y, ledRadius, ledBorderPaint)
-        }
-
-        // Start corner marker
-        val cornerX = when (perimeterConfig.startCorner) {
-            Corner.TOP_LEFT, Corner.BOTTOM_LEFT -> tvRect.left
-            Corner.TOP_RIGHT, Corner.BOTTOM_RIGHT -> tvRect.right
-        }
-        val cornerY = when (perimeterConfig.startCorner) {
-            Corner.TOP_LEFT, Corner.TOP_RIGHT -> tvRect.top
-            Corner.BOTTOM_LEFT, Corner.BOTTOM_RIGHT -> tvRect.bottom
-        }
-        canvas.drawCircle(cornerX, cornerY, ledRadius * 1.8f, cornerIndicatorPaint)
     }
 }

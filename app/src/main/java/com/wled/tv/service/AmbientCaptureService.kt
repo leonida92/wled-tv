@@ -11,7 +11,6 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.graphics.PixelFormat
-import android.graphics.RectF
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.media.ImageReader
@@ -27,11 +26,14 @@ import android.os.IBinder
 import android.os.PowerManager
 import android.util.DisplayMetrics
 import android.util.Log
+import android.view.Display
 import android.view.WindowManager
 import androidx.core.app.NotificationCompat
 import com.wled.tv.R
 import com.wled.tv.data.PreferencesRepository
+import com.wled.tv.model.DeviceType
 import com.wled.tv.model.WledConfig
+import com.wled.tv.model.WledDevice
 import com.wled.tv.network.WledHttpClient
 import com.wled.tv.network.WledUdpSender
 import com.wled.tv.processing.ScreenColorProcessor
@@ -53,6 +55,8 @@ class AmbientCaptureService : Service() {
     private var backgroundThread: HandlerThread? = null
     private var backgroundHandler: Handler? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    private var powerManager: PowerManager? = null
+    private var displayManager: DisplayManager? = null
     private var connectivityManager: ConnectivityManager? = null
 
     private val colorProcessor = ScreenColorProcessor()
@@ -60,8 +64,7 @@ class AmbientCaptureService : Service() {
     private val httpClient = WledHttpClient()
     private val serviceScope = CoroutineScope(Dispatchers.IO)
 
-    private var ledZones: List<RectF> = emptyList()
-    private var outputRgbBuffer: ByteArray = ByteArray(0)
+    private val deviceBuffers = HashMap<String, ByteArray>()
     private var isCapturing = AtomicBoolean(false)
     private var isScreenOff = AtomicBoolean(false)
     private var lastFrameTime = 0L
@@ -71,40 +74,73 @@ class AmbientCaptureService : Service() {
         override fun run() {
             if (!isCapturing.get()) return
 
-            val now = System.currentTimeMillis()
-            // Re-send current frame every 500ms to maintain WLED realtime connection
-            if (now - lastSendTime >= 500L && !isTestingOverride) {
-                val currentZones = ledZones
-                val currentLeds = currentZones.size
-                if (currentLeds > 0 && outputRgbBuffer.size >= currentLeds * 3) {
-                    udpSender.sendDrgbFrame(
-                        ip = config.ip,
-                        port = config.port,
-                        timeoutSeconds = 5,
-                        rgb = outputRgbBuffer,
-                        ledCount = currentLeds,
-                        colorOrder = config.calibration.colorOrder
-                    )
-                    lastSendTime = now
+            if (isScreenOff.get() || powerManager?.isInteractive == false) {
+                if (!isScreenOff.get()) {
+                    handleScreenOff()
                 }
+                backgroundHandler?.postDelayed(this, 1000L)
+                return
+            }
+
+            val now = System.currentTimeMillis()
+            // Re-send current frame every 500ms to maintain WLED realtime connection across all devices
+            if (now - lastSendTime >= 500L && !isTestingOverride) {
+                for (device in config.enabledDevices) {
+                    val leds = device.totalLeds
+                    val buf = deviceBuffers[device.id]
+                    if (buf != null && buf.size >= leds * 3 && leds > 0) {
+                        udpSender.sendDrgbFrame(
+                            ip = device.ip,
+                            port = device.port,
+                            timeoutSeconds = 5,
+                            rgb = buf,
+                            ledCount = leds,
+                            colorOrder = device.calibration.colorOrder
+                        )
+                    }
+                }
+                lastSendTime = now
             }
 
             backgroundHandler?.postDelayed(this, 500L)
         }
     }
 
+    private val displayListener = object : DisplayManager.DisplayListener {
+        override fun onDisplayAdded(displayId: Int) {}
+        override fun onDisplayRemoved(displayId: Int) {}
+        override fun onDisplayChanged(displayId: Int) {
+            if (displayId == Display.DEFAULT_DISPLAY) {
+                val display = displayManager?.getDisplay(displayId)
+                val state = display?.state
+                if (state == Display.STATE_OFF || state == Display.STATE_DOZE || state == Display.STATE_DOZE_SUSPEND) {
+                    handleScreenOff()
+                } else if (state == Display.STATE_ON) {
+                    handleScreenOn()
+                }
+            }
+        }
+    }
+
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
-                Intent.ACTION_SCREEN_OFF, Intent.ACTION_SHUTDOWN -> {
-                    Log.i(TAG, "Screen turned OFF / Standby detected")
-                    isScreenOff.set(true)
-                    blackoutLeds()
+                Intent.ACTION_SCREEN_OFF,
+                Intent.ACTION_SHUTDOWN,
+                Intent.ACTION_DREAMING_STARTED,
+                PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED -> {
+                    val isIdle = powerManager?.isDeviceIdleMode == true
+                    val isInteractive = powerManager?.isInteractive == true
+                    if (intent.action == Intent.ACTION_SCREEN_OFF ||
+                        intent.action == Intent.ACTION_SHUTDOWN ||
+                        intent.action == Intent.ACTION_DREAMING_STARTED ||
+                        isIdle || !isInteractive) {
+                        handleScreenOff()
+                    }
                 }
-                Intent.ACTION_SCREEN_ON -> {
-                    Log.i(TAG, "Screen turned ON - resuming ambient lighting")
-                    isScreenOff.set(false)
-                    wakeAndResume()
+                Intent.ACTION_SCREEN_ON,
+                Intent.ACTION_DREAMING_STOPPED -> {
+                    handleScreenOn()
                 }
             }
         }
@@ -113,7 +149,7 @@ class AmbientCaptureService : Service() {
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
             Log.i(TAG, "Network interface connected / available")
-            if (isCapturing.get()) {
+            if (isCapturing.get() && !isScreenOff.get()) {
                 ensureWledAwake()
             }
         }
@@ -125,11 +161,11 @@ class AmbientCaptureService : Service() {
         prefsRepo = PreferencesRepository(this)
         config = prefsRepo.loadConfig()
         createNotificationChannel()
+        startForegroundServiceWithNotification()
 
-        // Acquire Partial WakeLock to ensure TV standby does not kill foreground service
         try {
-            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-            wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "WLED_TV:AmbientWakeLock").apply {
+            powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            wakeLock = powerManager?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "WLED_TV:AmbientWakeLock")?.apply {
                 setReferenceCounted(false)
                 acquire()
             }
@@ -138,248 +174,301 @@ class AmbientCaptureService : Service() {
         }
 
         try {
+            displayManager = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+            displayManager?.registerDisplayListener(displayListener, null)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to register displayListener", e)
+        }
+
+        try {
+            val filter = IntentFilter().apply {
+                addAction(Intent.ACTION_SCREEN_OFF)
+                addAction(Intent.ACTION_SCREEN_ON)
+                addAction(Intent.ACTION_SHUTDOWN)
+                addAction(Intent.ACTION_DREAMING_STARTED)
+                addAction(Intent.ACTION_DREAMING_STOPPED)
+                addAction(PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(screenReceiver, filter, Context.RECEIVER_EXPORTED)
+            } else {
+                registerReceiver(screenReceiver, filter)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to register screenReceiver", e)
+        }
+
+        try {
             connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
             val request = NetworkRequest.Builder().build()
             connectivityManager?.registerNetworkCallback(request, networkCallback)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to register network callback", e)
+            Log.e(TAG, "Failed to register networkCallback", e)
         }
-
-        val filter = IntentFilter().apply {
-            addAction(Intent.ACTION_SCREEN_OFF)
-            addAction(Intent.ACTION_SCREEN_ON)
-            addAction(Intent.ACTION_SHUTDOWN)
-        }
-        registerReceiver(screenReceiver, filter)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val action = intent?.action
+        // ALWAYS ensure foreground status is updated immediately
+        startForegroundServiceWithNotification()
 
-        if (action == ACTION_STOP) {
-            stopCapture()
-            stopSelf()
-            return START_NOT_STICKY
-        }
-
-        if (action == ACTION_RELOAD_CONFIG) {
-            reloadConfig()
-            return START_STICKY
+        when (intent?.action) {
+            ACTION_STOP -> {
+                Log.i(TAG, "Stop command received")
+                stopCapture()
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            ACTION_RELOAD_CONFIG -> {
+                reloadConfig()
+                return START_STICKY
+            }
         }
 
         val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, 0) ?: 0
-        val resultData = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        val resultData: Intent? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             intent?.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
         } else {
             @Suppress("DEPRECATION")
             intent?.getParcelableExtra(EXTRA_RESULT_DATA)
         }
 
-        if (resultCode != 0 && resultData != null) {
+        if (resultCode != 0 && resultData != null && !isCapturing.get()) {
             config = prefsRepo.loadConfig()
-            startForegroundServiceWithNotification()
-            initCapture(resultCode, resultData)
-        } else {
-            stopSelf()
+            startCapture(resultCode, resultData)
         }
 
         return START_STICKY
     }
 
-    fun reloadConfig() {
-        try {
-            config = prefsRepo.loadConfig()
-            ledZones = config.perimeter.computeLedZones()
-            val totalLeds = ledZones.size
-            if (outputRgbBuffer.size != totalLeds * 3) {
-                outputRgbBuffer = ByteArray(totalLeds * 3)
-            }
-            Log.i(TAG, "Live config reloaded ($totalLeds LEDs @ ${config.calibration.fps} FPS, IP=${config.ip})")
-        } catch (e: Exception) {
-            Log.e(TAG, "Error reloading config live", e)
-        }
-    }
-
     private fun startForegroundServiceWithNotification() {
         val notification = createNotification()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to startForeground", e)
         }
     }
 
-    private fun initCapture(resultCode: Int, resultData: Intent) {
+    fun reloadConfig() {
+        config = prefsRepo.loadConfig()
+        colorProcessor.reset()
+        ensureWledAwake()
+        Log.i(TAG, "Config reloaded: ${config.enabledDevices.size} enabled devices, Saturation=${config.calibration.saturation}")
+    }
+
+    private fun startCapture(resultCode: Int, resultData: Intent) {
         val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         mediaProjection = projectionManager.getMediaProjection(resultCode, resultData)
 
         if (mediaProjection == null) {
-            Log.e(TAG, "Failed to obtain MediaProjection instance")
+            Log.e(TAG, "Failed to obtain MediaProjection")
             stopSelf()
             return
         }
-
-        mediaProjection?.registerCallback(object : MediaProjection.Callback() {
-            override fun onStop() {
-                Log.w(TAG, "MediaProjection session stopped by system")
-                stopCapture()
-                stopSelf()
-            }
-        }, null)
-
-        ledZones = config.perimeter.computeLedZones()
-        val totalLeds = ledZones.size
-        outputRgbBuffer = ByteArray(totalLeds * 3)
-
-        val windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        val metrics = DisplayMetrics()
-        @Suppress("DEPRECATION")
-        windowManager.defaultDisplay.getRealMetrics(metrics)
-
-        val captureWidth = 320
-        val captureHeight = 180
-        val densityDpi = metrics.densityDpi
-
-        backgroundThread = HandlerThread("WledAmbientThread", android.os.Process.THREAD_PRIORITY_DISPLAY).apply {
-            start()
-        }
-        backgroundHandler = Handler(backgroundThread!!.looper)
-
-        imageReader = ImageReader.newInstance(
-            captureWidth,
-            captureHeight,
-            PixelFormat.RGBA_8888,
-            3
-        )
-
-        virtualDisplay = mediaProjection?.createVirtualDisplay(
-            "WledTvVirtualDisplay",
-            captureWidth,
-            captureHeight,
-            densityDpi,
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-            imageReader?.surface,
-            null,
-            backgroundHandler
-        )
 
         isCapturing.set(true)
         isRunning = true
         stateListener?.onStateChanged(true)
 
-        // Wake WLED controller and set master brightness
+        // Wake WLED controllers and set target brightness via HTTP
         ensureWledAwake()
 
-        imageReader?.setOnImageAvailableListener({ reader ->
-            if (!isCapturing.get()) return@setOnImageAvailableListener
-
-            val image = try {
-                reader.acquireLatestImage()
-            } catch (e: Exception) {
-                null
-            } ?: return@setOnImageAvailableListener
-
-            if (isTestingOverride) {
-                image.close()
-                return@setOnImageAvailableListener
+        mediaProjection?.registerCallback(object : MediaProjection.Callback() {
+            override fun onStop() {
+                Log.w(TAG, "MediaProjection stopped by system")
+                stopCapture()
+                stopSelf()
             }
+        }, null)
 
-            val targetInterval = 1000L / config.calibration.fps.coerceIn(15, 60)
-            val now = System.currentTimeMillis()
-            if (now - lastFrameTime < targetInterval) {
-                image.close()
-                return@setOnImageAvailableListener
-            }
-            lastFrameTime = now
-
-            try {
-                val currentZones = ledZones
-                val currentLeds = currentZones.size
-                if (colorProcessor.processImage(
-                        image = image,
-                        zones = currentZones,
-                        calibration = config.calibration,
-                        perimeterConfig = config.perimeter,
-                        outputRgb = outputRgbBuffer
-                    )
-                ) {
-                    // Send UDP DRGB realtime frame to WLED
-                    udpSender.sendDrgbFrame(
-                        ip = config.ip,
-                        port = config.port,
-                        timeoutSeconds = 5,
-                        rgb = outputRgbBuffer,
-                        ledCount = currentLeds,
-                        colorOrder = config.calibration.colorOrder
-                    )
-                    lastSendTime = now
-
-                    // Notify live preview listener if open
-                    liveFrameListener?.onFrameProcessed(outputRgbBuffer, currentLeds)
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error processing frame", e)
-            } finally {
-                image.close()
-            }
-        }, backgroundHandler)
-
-        // Start heartbeat keepalive to maintain ambient lighting on static/paused screens
-        backgroundHandler?.postDelayed(keepaliveRunnable, 500L)
-
-        Log.i(TAG, "Ambient screen capture started ($totalLeds LEDs @ ${config.calibration.fps} FPS)")
+        initCapture()
     }
 
-    private fun blackoutLeds() {
-        serviceScope.launch {
-            val totalLeds = ledZones.size
-            if (totalLeds > 0) {
-                val blackFrame = ByteArray(totalLeds * 3)
-                udpSender.sendDrgbFrame(
-                    ip = config.ip,
-                    port = config.port,
-                    timeoutSeconds = 5,
-                    rgb = blackFrame,
-                    ledCount = totalLeds,
-                    colorOrder = config.calibration.colorOrder
-                )
+    private fun initCapture() {
+        try {
+            backgroundThread = HandlerThread("WledCaptureThread").apply { start() }
+            backgroundHandler = Handler(backgroundThread!!.looper)
+
+            val windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+            val metrics = DisplayMetrics()
+            @Suppress("DEPRECATION")
+            windowManager.defaultDisplay.getRealMetrics(metrics)
+
+            // Scaled buffer for ultra-low latency edge color extraction (320x180)
+            val captureWidth = 320
+            val captureHeight = 180
+            val densityDpi = metrics.densityDpi
+
+            imageReader = ImageReader.newInstance(
+                captureWidth,
+                captureHeight,
+                PixelFormat.RGBA_8888,
+                2
+            )
+
+            colorProcessor.reset()
+
+            virtualDisplay = mediaProjection?.createVirtualDisplay(
+                "WledAmbientDisplay",
+                captureWidth,
+                captureHeight,
+                densityDpi,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                imageReader?.surface,
+                null,
+                backgroundHandler
+            )
+
+            imageReader?.setOnImageAvailableListener({ reader ->
+                val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
+
+                if (!isCapturing.get()) {
+                    image.close()
+                    return@setOnImageAvailableListener
+                }
+
+                if (isScreenOff.get() || powerManager?.isInteractive == false) {
+                    if (!isScreenOff.get()) {
+                        handleScreenOff()
+                    }
+                    image.close()
+                    return@setOnImageAvailableListener
+                }
+
+                if (isTestingOverride) {
+                    image.close()
+                    return@setOnImageAvailableListener
+                }
+
+                val targetInterval = 1000L / config.calibration.fps.coerceIn(15, 60)
+                val now = System.currentTimeMillis()
+                if (now - lastFrameTime < targetInterval) {
+                    image.close()
+                    return@setOnImageAvailableListener
+                }
+                lastFrameTime = now
+
+                try {
+                    val devices = config.enabledDevices
+                    for (device in devices) {
+                        val leds = device.totalLeds
+                        if (leds <= 0) continue
+
+                        val requiredSize = leds * 3
+                        var buf = deviceBuffers[device.id]
+                        if (buf == null || buf.size != requiredSize) {
+                            buf = ByteArray(requiredSize)
+                            deviceBuffers[device.id] = buf
+                        }
+
+                        if (colorProcessor.processDevice(image, device, device.calibration, buf)) {
+                            udpSender.sendDrgbFrame(
+                                ip = device.ip,
+                                port = device.port,
+                                timeoutSeconds = 5,
+                                rgb = buf,
+                                ledCount = leds,
+                                colorOrder = device.calibration.colorOrder
+                            )
+
+                            liveFrameListener?.onDeviceFrameProcessed(device.id, buf, leds)
+                        }
+                    }
+                    lastSendTime = now
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error processing frame", e)
+                } finally {
+                    image.close()
+                }
+            }, backgroundHandler)
+
+            // Start heartbeat keepalive to maintain ambient lighting on static/paused screens
+            backgroundHandler?.postDelayed(keepaliveRunnable, 500L)
+
+            Log.i(TAG, "Ambient multi-device capture started (${config.enabledDevices.size} devices @ ${config.calibration.fps} FPS)")
+        } catch (e: Exception) {
+            Log.e(TAG, "Exception in initCapture", e)
+            stopCapture()
+            stopSelf()
+        }
+    }
+
+    private fun handleScreenOff() {
+        if (isScreenOff.compareAndSet(false, true)) {
+            Log.i(TAG, "Screen sleep / standby / daydream detected - turning off WLED lights")
+            blackoutAndPowerOffLeds()
+        }
+    }
+
+    private fun handleScreenOn() {
+        if (isScreenOff.compareAndSet(true, false)) {
+            Log.i(TAG, "Screen wake / active detected - resuming ambient lighting")
+            ensureWledAwake()
+            lastSendTime = 0L
+            lastFrameTime = 0L
+            backgroundHandler?.removeCallbacks(keepaliveRunnable)
+            backgroundHandler?.post(keepaliveRunnable)
+        }
+    }
+
+    private fun blackoutAndPowerOffLeds() {
+        serviceScope.launch(Dispatchers.IO) {
+            for (device in config.enabledDevices) {
+                val leds = device.totalLeds
+                if (leds > 0) {
+                    val blackFrame = ByteArray(leds * 3)
+                    // Send blackout frames to immediately turn off LEDs before HTTP takes effect
+                    for (i in 0..2) {
+                        udpSender.sendDrgbFrame(
+                            ip = device.ip,
+                            port = device.port,
+                            timeoutSeconds = 1,
+                            rgb = blackFrame,
+                            ledCount = leds,
+                            colorOrder = device.calibration.colorOrder
+                        )
+                        delay(40L)
+                    }
+                }
+                // Clear frame buffer so stale frames are never re-transmitted
+                deviceBuffers[device.id]?.fill(0)
+                // Hardware turn-off command via HTTP JSON API
+                httpClient.turnOff(device.ip)
             }
         }
     }
 
     private fun ensureWledAwake() {
         serviceScope.launch {
-            for (attempt in 1..5) {
-                val success = httpClient.wakeAndSetBrightness(config.ip, config.calibration.maxBrightness)
-                if (success) break
-                delay(1000L)
+            for (device in config.enabledDevices) {
+                launch {
+                    for (attempt in 1..3) {
+                        val success = httpClient.wakeAndSetBrightness(device.ip, device.calibration.maxBrightness)
+                        if (success) break
+                        delay(1000L)
+                    }
+                }
             }
         }
     }
 
-    private fun wakeAndResume() {
-        ensureWledAwake()
-        lastSendTime = 0L
-        lastFrameTime = 0L
-        backgroundHandler?.removeCallbacks(keepaliveRunnable)
-        backgroundHandler?.post(keepaliveRunnable)
-    }
-
     private fun stopCapture() {
-        isCapturing.set(false)
+        if (!isCapturing.getAndSet(false)) return
+
         isRunning = false
         stateListener?.onStateChanged(false)
-        colorProcessor.reset()
 
         try {
-            backgroundHandler?.removeCallbacks(keepaliveRunnable)
-        } catch (e: Exception) {
-            // ignore
-        }
+            backgroundHandler?.removeCallbacksAndMessages(null)
+        } catch (_: Exception) {}
 
         try {
             virtualDisplay?.release()
@@ -410,7 +499,7 @@ class AmbientCaptureService : Service() {
             Log.e(TAG, "Error stopping MediaProjection", e)
         }
 
-        blackoutLeds()
+        blackoutAndPowerOffLeds()
         udpSender.close()
         Log.i(TAG, "Ambient screen capture stopped")
     }
@@ -431,18 +520,19 @@ class AmbientCaptureService : Service() {
         }
         val stopPendingIntent = PendingIntent.getService(
             this,
-            1,
+            0,
             stopIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(getString(R.string.notification_title))
-            .setContentText(getString(R.string.notification_text, config.ip))
+            .setContentTitle("WLED TV Ambient Active")
+            .setContentText("Streaming ambient bias lighting to ${config.enabledDevices.size} lights")
             .setSmallIcon(R.drawable.ic_launcher)
             .setContentIntent(pendingIntent)
-            .addAction(R.drawable.ic_power, getString(R.string.action_stop), stopPendingIntent)
+            .addAction(R.drawable.ic_power, "Stop", stopPendingIntent)
             .setOngoing(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
     }
 
@@ -450,10 +540,10 @@ class AmbientCaptureService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                getString(R.string.notification_channel_name),
+                "Ambient Lighting Service",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = getString(R.string.notification_channel_desc)
+                description = "Running real-time screen ambient capture"
                 setShowBadge(false)
             }
             val manager = getSystemService(NotificationManager::class.java)
@@ -464,23 +554,21 @@ class AmbientCaptureService : Service() {
     override fun onDestroy() {
         try {
             unregisterReceiver(screenReceiver)
-        } catch (e: Exception) {
-            // ignore
-        }
+        } catch (_: Exception) {}
+        try {
+            displayManager?.unregisterDisplayListener(displayListener)
+            displayManager = null
+        } catch (_: Exception) {}
         try {
             connectivityManager?.unregisterNetworkCallback(networkCallback)
             connectivityManager = null
-        } catch (e: Exception) {
-            // ignore
-        }
+        } catch (_: Exception) {}
         try {
             if (wakeLock?.isHeld == true) {
                 wakeLock?.release()
             }
             wakeLock = null
-        } catch (e: Exception) {
-            // ignore
-        }
+        } catch (_: Exception) {}
         stopCapture()
         if (currentServiceInstance == this) {
             currentServiceInstance = null
@@ -491,7 +579,7 @@ class AmbientCaptureService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     interface LiveFrameListener {
-        fun onFrameProcessed(rgb: ByteArray, count: Int)
+        fun onDeviceFrameProcessed(deviceId: String, rgb: ByteArray, count: Int)
     }
 
     interface ServiceStateListener {
