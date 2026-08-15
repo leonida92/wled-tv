@@ -1,5 +1,6 @@
 package com.wled.tv.ui
 
+import android.graphics.Color
 import android.os.Bundle
 import android.view.KeyEvent
 import android.view.View
@@ -26,6 +27,7 @@ class ZoneEditorActivity : AppCompatActivity() {
     private lateinit var btnTargetBottom: Button
     private lateinit var btnTargetLeft: Button
     private lateinit var btnTargetRight: Button
+    private lateinit var btnAutoDetect: Button
     private lateinit var btnResetZones: Button
     private lateinit var btnDone: Button
     private lateinit var tvInstruction: TextView
@@ -51,6 +53,7 @@ class ZoneEditorActivity : AppCompatActivity() {
         btnTargetBottom = findViewById(R.id.btnTargetBottom)
         btnTargetLeft = findViewById(R.id.btnTargetLeft)
         btnTargetRight = findViewById(R.id.btnTargetRight)
+        btnAutoDetect = findViewById(R.id.btnAutoDetect)
         btnResetZones = findViewById(R.id.btnResetZones)
         btnDone = findViewById(R.id.btnDone)
         tvInstruction = findViewById(R.id.tvInstruction)
@@ -98,6 +101,10 @@ class ZoneEditorActivity : AppCompatActivity() {
         btnTargetLeft.setOnKeyListener(borderKeyListener)
         btnTargetRight.setOnKeyListener(borderKeyListener)
 
+        btnAutoDetect.setOnClickListener {
+            toggleAutoDetect()
+        }
+
         btnResetZones.setOnClickListener {
             resetToAspectPreset(AspectRatioPreset.FULL_16_9)
         }
@@ -123,6 +130,12 @@ class ZoneEditorActivity : AppCompatActivity() {
         updateStatusText()
     }
 
+    private fun toggleAutoDetect() {
+        val current = config.perimeter.autoLetterbox
+        config = config.copy(perimeter = config.perimeter.copy(autoLetterbox = !current))
+        saveAndUpdate()
+    }
+
     private fun cycleAspectRatioPreset() {
         val current = config.perimeter.getActiveAspectRatioPreset()
         val allPresets = AspectRatioPreset.values().filter { it != AspectRatioPreset.CUSTOM }
@@ -140,7 +153,8 @@ class ZoneEditorActivity : AppCompatActivity() {
             topCrop = preset.topCrop,
             bottomCrop = preset.bottomCrop,
             leftCrop = preset.leftCrop,
-            rightCrop = preset.rightCrop
+            rightCrop = preset.rightCrop,
+            autoLetterbox = false
         )
         config = config.copy(perimeter = p)
         saveAndUpdate()
@@ -149,10 +163,10 @@ class ZoneEditorActivity : AppCompatActivity() {
     private fun adjustActiveBorder(delta: Float) {
         val p = config.perimeter
         val updatedPerimeter = when (activeBorder) {
-            ActiveBorder.TOP -> p.copy(topCrop = (p.topCrop + delta).coerceIn(0f, 0.40f))
-            ActiveBorder.BOTTOM -> p.copy(bottomCrop = (p.bottomCrop + delta).coerceIn(0f, 0.40f))
-            ActiveBorder.LEFT -> p.copy(leftCrop = (p.leftCrop + delta).coerceIn(0f, 0.40f))
-            ActiveBorder.RIGHT -> p.copy(rightCrop = (p.rightCrop + delta).coerceIn(0f, 0.40f))
+            ActiveBorder.TOP -> p.copy(topCrop = (p.topCrop + delta).coerceIn(0f, 0.40f), autoLetterbox = false)
+            ActiveBorder.BOTTOM -> p.copy(bottomCrop = (p.bottomCrop + delta).coerceIn(0f, 0.40f), autoLetterbox = false)
+            ActiveBorder.LEFT -> p.copy(leftCrop = (p.leftCrop + delta).coerceIn(0f, 0.40f), autoLetterbox = false)
+            ActiveBorder.RIGHT -> p.copy(rightCrop = (p.rightCrop + delta).coerceIn(0f, 0.40f), autoLetterbox = false)
             ActiveBorder.NONE -> p
         }
         config = config.copy(perimeter = updatedPerimeter)
@@ -175,14 +189,26 @@ class ZoneEditorActivity : AppCompatActivity() {
         btnTargetLeft.text = String.format(Locale.US, "▲ Left: %.0f%% ▼", p.leftCrop * 100)
         btnTargetRight.text = String.format(Locale.US, "▲ Right: %.0f%% ▼", p.rightCrop * 100)
 
-        val preset = p.getActiveAspectRatioPreset()
-        btnAspectPreset.text = "Aspect: ${preset.displayName}"
+        if (p.autoLetterbox) {
+            btnAutoDetect.text = "Auto-Detect: ON"
+            btnAutoDetect.setTextColor(Color.parseColor("#00E676"))
+            btnAspectPreset.text = "Aspect: Auto-Letterbox"
+        } else {
+            btnAutoDetect.text = "Auto-Detect: OFF"
+            btnAutoDetect.setTextColor(Color.parseColor("#94A3B8"))
+            val preset = p.getActiveAspectRatioPreset()
+            btnAspectPreset.text = "Aspect: ${preset.displayName}"
+        }
 
         updateStatusText()
     }
 
     private fun updateStatusText() {
         val p = config.perimeter
+        if (p.autoLetterbox) {
+            tvInstruction.text = "Dynamic Auto-Detection ACTIVE: Letterbox bars are scanned in real-time."
+            return
+        }
         val activeVal = when (activeBorder) {
             ActiveBorder.TOP -> "Top: ${(p.topCrop * 100).toInt()}%"
             ActiveBorder.BOTTOM -> "Bottom: ${(p.bottomCrop * 100).toInt()}%"

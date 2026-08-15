@@ -21,12 +21,20 @@ class ScreenColorProcessor {
     private var candidateTopCrop: Float = 0.0f
     private var candidateBottomCrop: Float = 0.0f
     private var stableFrameCount: Int = 0
+    private var cachedDynamicZones: List<RectF>? = null
+    private var lastAppliedTopCrop: Float = -1f
+    private var lastAppliedBottomCrop: Float = -1f
 
     fun reset() {
         smoothingFilter.reset()
         detectedTopCrop = 0.0f
         detectedBottomCrop = 0.0f
+        candidateTopCrop = 0.0f
+        candidateBottomCrop = 0.0f
         stableFrameCount = 0
+        cachedDynamicZones = null
+        lastAppliedTopCrop = -1f
+        lastAppliedBottomCrop = -1f
     }
 
     /**
@@ -77,17 +85,31 @@ class ScreenColorProcessor {
         perimeterConfig: PerimeterConfig? = null,
         outputRgb: ByteArray
     ): Boolean {
-        val ledCount = zones.size
-        if (ledCount == 0 || width <= 0 || height <= 0) return false
+        if (width <= 0 || height <= 0) return false
+
+        // Determine active zones (dynamic if autoLetterbox is enabled, else static zones)
+        val activeZones: List<RectF>
+        if (perimeterConfig?.autoLetterbox == true) {
+            detectLetterbox(buffer, width, height, rowStride, pixelStride)
+            if (cachedDynamicZones == null || detectedTopCrop != lastAppliedTopCrop || detectedBottomCrop != lastAppliedBottomCrop) {
+                cachedDynamicZones = perimeterConfig.copy(
+                    topCrop = detectedTopCrop,
+                    bottomCrop = detectedBottomCrop
+                ).computeLedZones()
+                lastAppliedTopCrop = detectedTopCrop
+                lastAppliedBottomCrop = detectedBottomCrop
+            }
+            activeZones = cachedDynamicZones ?: zones
+        } else {
+            activeZones = zones
+        }
+
+        val ledCount = activeZones.size
+        if (ledCount == 0) return false
 
         val requiredRawSize = ledCount * 3
         if (rawRgbBuffer.size != requiredRawSize) {
             rawRgbBuffer = ByteArray(requiredRawSize)
-        }
-
-        // Check dynamic letterbox if enabled
-        if (perimeterConfig?.autoLetterbox == true) {
-            detectLetterbox(buffer, width, height, rowStride, pixelStride)
         }
 
         val sat = calibration.saturation.coerceIn(0.5f, 3.0f)
@@ -102,7 +124,7 @@ class ScreenColorProcessor {
         val blackCutoff = calibration.blackThreshold.coerceIn(0, 50).toFloat()
 
         for (i in 0 until ledCount) {
-            val zone = zones[i]
+            val zone = activeZones[i]
             val x0 = (zone.left * width).toInt().coerceIn(0, width - 1)
             val x1 = (zone.right * width).toInt().coerceIn(x0 + 1, width)
             val y0 = (zone.top * height).toInt().coerceIn(0, height - 1)
@@ -218,7 +240,7 @@ class ScreenColorProcessor {
     }
 
     /**
-     * Fast 3-probe line analysis to detect letterbox bars.
+     * Comprehensive multi-column row scanning to reliably detect black letterbox bars.
      */
     private fun detectLetterbox(
         buffer: ByteBuffer,
@@ -227,33 +249,52 @@ class ScreenColorProcessor {
         rowStride: Int,
         pixelStride: Int
     ) {
-        val probeX1 = (width * 0.25f).toInt()
-        val probeX2 = (width * 0.50f).toInt()
-        val probeX3 = (width * 0.75f).toInt()
+        // Multi-point probe columns across screen width (10% to 90%)
+        val probeX = intArrayOf(
+            (width * 0.10f).toInt(),
+            (width * 0.20f).toInt(),
+            (width * 0.30f).toInt(),
+            (width * 0.40f).toInt(),
+            (width * 0.50f).toInt(),
+            (width * 0.60f).toInt(),
+            (width * 0.70f).toInt(),
+            (width * 0.80f).toInt(),
+            (width * 0.90f).toInt()
+        )
 
-        val maxScanRows = (height * 0.25f).toInt() // Scan up to 25% height for bars
+        val maxScanRows = (height * 0.30f).toInt() // Scan up to 30% height for bars
         var foundTop = 0
         var foundBottom = 0
 
-        // Scan from top down
+        // Scan from top down: A row is black if ALL probe columns are black
         for (y in 0 until maxScanRows) {
-            val offset1 = y * rowStride + probeX1 * pixelStride
-            val offset2 = y * rowStride + probeX2 * pixelStride
-            val offset3 = y * rowStride + probeX3 * pixelStride
-
-            if (isPixelNonBlack(buffer, offset1) || isPixelNonBlack(buffer, offset2) || isPixelNonBlack(buffer, offset3)) {
+            var rowHasPicture = false
+            val rowOffset = y * rowStride
+            for (px in probeX) {
+                val offset = rowOffset + px * pixelStride
+                if (isPixelNonBlack(buffer, offset)) {
+                    rowHasPicture = true
+                    break
+                }
+            }
+            if (rowHasPicture) {
                 foundTop = y
                 break
             }
         }
 
-        // Scan from bottom up
+        // Scan from bottom up: A row is black if ALL probe columns are black
         for (y in (height - 1) downTo (height - maxScanRows)) {
-            val offset1 = y * rowStride + probeX1 * pixelStride
-            val offset2 = y * rowStride + probeX2 * pixelStride
-            val offset3 = y * rowStride + probeX3 * pixelStride
-
-            if (isPixelNonBlack(buffer, offset1) || isPixelNonBlack(buffer, offset2) || isPixelNonBlack(buffer, offset3)) {
+            var rowHasPicture = false
+            val rowOffset = y * rowStride
+            for (px in probeX) {
+                val offset = rowOffset + px * pixelStride
+                if (isPixelNonBlack(buffer, offset)) {
+                    rowHasPicture = true
+                    break
+                }
+            }
+            if (rowHasPicture) {
                 foundBottom = height - 1 - y
                 break
             }
@@ -262,10 +303,20 @@ class ScreenColorProcessor {
         val topCropPct = (foundTop.toFloat() / height).coerceIn(0f, 0.25f)
         val bottomCropPct = (foundBottom.toFloat() / height).coerceIn(0f, 0.25f)
 
-        // Stability filtering (5 consecutive frames)
+        // Ignore whole-screen blackouts (e.g. scene transitions) where no content was found at all
+        if (foundTop == 0 && foundBottom == 0 && topCropPct == 0f && bottomCropPct == 0f) {
+            // Check if center of screen is also completely black
+            val centerOffset = (height / 2) * rowStride + (width / 2) * pixelStride
+            if (!isPixelNonBlack(buffer, centerOffset)) {
+                // Entire screen is dark/black; retain current detected crop to avoid bouncing
+                return
+            }
+        }
+
+        // Stability filtering (3 consecutive frames)
         if (Math.abs(topCropPct - candidateTopCrop) < 0.015f && Math.abs(bottomCropPct - candidateBottomCrop) < 0.015f) {
             stableFrameCount++
-            if (stableFrameCount >= 5) {
+            if (stableFrameCount >= 3) {
                 detectedTopCrop = candidateTopCrop
                 detectedBottomCrop = candidateBottomCrop
             }
@@ -281,6 +332,7 @@ class ScreenColorProcessor {
         val r = buffer.get(offset).toInt() and 0xFF
         val g = buffer.get(offset + 1).toInt() and 0xFF
         val b = buffer.get(offset + 2).toInt() and 0xFF
-        return (r > 18 || g > 18 || b > 18)
+        // Consider pixel non-black if brightness exceeds threshold 16
+        return (r > 16 || g > 16 || b > 16)
     }
 }

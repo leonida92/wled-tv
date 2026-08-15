@@ -169,12 +169,28 @@
             android:textStyle="bold" />
 
         <Button
+            android:id="@+id/btnAutoDetect"
+            android:layout_width="wrap_content"
+            android:layout_height="42dp"
+            android:layout_marginEnd="6dp"
+            android:background="@drawable/bg_card_selector"
+            android:nextFocusUp="@+id/btnDone"
+            android:nextFocusLeft="@+id/btnTargetDepth"
+            android:nextFocusRight="@+id/btnResetZones"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:text="Auto-Detect: OFF"
+            android:textColor="@color/accent_cyan"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <Button
             android:id="@+id/btnResetZones"
             android:layout_width="wrap_content"
             android:layout_height="42dp"
             android:background="@drawable/bg_card_selector"
             android:nextFocusUp="@+id/btnDone"
-            android:nextFocusLeft="@+id/btnTargetDepth"
+            android:nextFocusLeft="@+id/btnAutoDetect"
             android:paddingStart="12dp"
             android:paddingEnd="12dp"
             android:text="Reset"
