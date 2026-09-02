@@ -9,10 +9,9 @@ import java.net.SocketException
 class WledUdpSender {
 
     private var socket: DatagramSocket? = null
-    private var packetBuffer = ByteArray(0)
-    private var datagramPacket: DatagramPacket? = null
-    private var cachedIp: String? = null
-    private var cachedAddress: InetAddress? = null
+    private val addressMap = HashMap<String, InetAddress>()
+    private val packetBuffers = HashMap<String, ByteArray>()
+    private val datagramPackets = HashMap<String, DatagramPacket>()
     private var lastErrorTime = 0L
 
     /**
@@ -43,17 +42,23 @@ class WledUdpSender {
         try {
             ensureSocket()
 
-            if (cachedIp != cleanIp || cachedAddress == null) {
-                cachedAddress = InetAddress.getByName(cleanIp)
-                cachedIp = cleanIp
+            var address = addressMap[cleanIp]
+            if (address == null) {
+                address = InetAddress.getByName(cleanIp)
+                addressMap[cleanIp] = address
             }
 
             val requiredSize = 2 + ledCount * 3
-            if (packetBuffer.size != requiredSize) {
+            var packetBuffer = packetBuffers[cleanIp]
+            var datagramPacket = datagramPackets[cleanIp]
+
+            if (packetBuffer == null || packetBuffer.size != requiredSize) {
                 packetBuffer = ByteArray(requiredSize)
-                datagramPacket = DatagramPacket(packetBuffer, requiredSize, cachedAddress, port)
+                packetBuffers[cleanIp] = packetBuffer
+                datagramPacket = DatagramPacket(packetBuffer, requiredSize, address, port)
+                datagramPackets[cleanIp] = datagramPacket
             } else {
-                datagramPacket?.address = cachedAddress
+                datagramPacket?.address = address
                 datagramPacket?.port = port
             }
 
@@ -154,8 +159,9 @@ class WledUdpSender {
             socket?.close()
         } catch (_: Exception) {}
         socket = null
-        cachedAddress = null
-        cachedIp = null
+        addressMap.clear()
+        packetBuffers.clear()
+        datagramPackets.clear()
     }
 
     companion object {
