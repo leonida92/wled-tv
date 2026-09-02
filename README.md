@@ -11,6 +11,22 @@ It captures on-screen video in real time, extracts rich chroma-weighted edge and
 
 ---
 
+## Screenshots
+
+<p align="center">
+  <img src="media/dashboard.png" alt="WLED TV Main Dashboard and Live Simulation" width="100%" />
+</p>
+
+| Light Setup &amp; Device Fleet | Configure Light &amp; Network Ping |
+| :---: | :---: |
+| <img src="media/devices.png" width="100%" alt="Light Setup and Device Fleet" /> | <img src="media/edit_device.png" width="100%" alt="Configure Light and Network Ping" /> |
+| **Visual Zone &amp; Aspect Calibration** | **Color &amp; Optical Calibration** |
+| <img src="media/zones.png" width="100%" alt="Visual Screen Zone and Aspect Ratio Calibration" /> | <img src="media/calibration.png" width="100%" alt="Color and Performance Calibration" /> |
+| **Strip Perimeter Geometry** | **System &amp; Performance Settings** |
+| <img src="media/perimeter.png" width="100%" alt="Perimeter Strip Geometry" /> | <img src="media/system.png" width="100%" alt="System and Connection Settings" /> |
+
+---
+
 ## Features
 
 - **Multi-Device Fleet Streaming**:
