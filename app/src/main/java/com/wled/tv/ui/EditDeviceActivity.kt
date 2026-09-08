@@ -1,10 +1,14 @@
 package com.wled.tv.ui
 
 import android.app.AlertDialog
+import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
+import android.view.KeyEvent
 import android.view.View
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -111,6 +115,7 @@ class EditDeviceActivity : AppCompatActivity() {
 
         bindViews()
         setupListeners()
+        setupNavigation()
         populateUi()
     }
 
@@ -155,8 +160,6 @@ class EditDeviceActivity : AppCompatActivity() {
 
         btnCancelEdit = findViewById(R.id.btnCancelEdit)
         btnSaveEdit = findViewById(R.id.btnSaveEdit)
-
-        etDeviceName.requestFocus()
     }
 
     private fun setupListeners() {
@@ -255,6 +258,276 @@ class EditDeviceActivity : AppCompatActivity() {
         btnSaveEdit.setOnClickListener {
             saveAndFinish()
         }
+    }
+
+    private fun showKeyboard(view: EditText) {
+        view.requestFocus()
+        view.setSelection(view.text.length)
+        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        imm.showSoftInput(view, InputMethodManager.SHOW_IMPLICIT)
+    }
+
+    private fun hideKeyboard(view: View) {
+        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        imm.hideSoftInputFromWindow(view.windowToken, 0)
+    }
+
+    private fun setupNavigation() {
+        val dpadNavKeys = setOf(
+            KeyEvent.KEYCODE_DPAD_DOWN,
+            KeyEvent.KEYCODE_DPAD_UP,
+            KeyEvent.KEYCODE_DPAD_RIGHT,
+            KeyEvent.KEYCODE_DPAD_LEFT
+        )
+
+        // Dismiss keyboard when text boxes lose focus
+        etDeviceName.setOnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus) hideKeyboard(etDeviceName)
+        }
+        etDeviceIp.setOnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus) hideKeyboard(etDeviceIp)
+        }
+
+        // Clicking or pressing Center opens keyboard
+        etDeviceName.setOnClickListener { showKeyboard(etDeviceName) }
+        etDeviceIp.setOnClickListener { showKeyboard(etDeviceIp) }
+
+        // IME Editor actions
+        etDeviceName.setOnEditorActionListener { _, actionId, event ->
+            if (actionId == EditorInfo.IME_ACTION_NEXT || actionId == EditorInfo.IME_ACTION_DONE ||
+                (event != null && event.keyCode == KeyEvent.KEYCODE_ENTER && event.action == KeyEvent.ACTION_DOWN)) {
+                hideKeyboard(etDeviceName)
+                etDeviceIp.requestFocus()
+                true
+            } else false
+        }
+
+        etDeviceIp.setOnEditorActionListener { _, actionId, event ->
+            if (actionId == EditorInfo.IME_ACTION_DONE || actionId == EditorInfo.IME_ACTION_NEXT ||
+                (event != null && event.keyCode == KeyEvent.KEYCODE_ENTER && event.action == KeyEvent.ACTION_DOWN)) {
+                hideKeyboard(etDeviceIp)
+                btnPingDevice.requestFocus()
+                true
+            } else false
+        }
+
+        // D-Pad Navigation for etDeviceName: Never move cursor character-by-character on D-pad
+        etDeviceName.setOnKeyListener { _, keyCode, event ->
+            if (keyCode in dpadNavKeys) {
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    hideKeyboard(etDeviceName)
+                    when (keyCode) {
+                        KeyEvent.KEYCODE_DPAD_DOWN -> etDeviceIp.requestFocus()
+                        KeyEvent.KEYCODE_DPAD_UP -> btnIdentifyDevice.requestFocus()
+                        KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                            if (cardPerimeterSettings.visibility == View.VISIBLE) {
+                                cardPerimeterSettings.requestFocus()
+                            } else {
+                                cardCalibrationSettings.requestFocus()
+                            }
+                        }
+                        KeyEvent.KEYCODE_DPAD_LEFT -> { /* Keep focus without cursor stepping */ }
+                    }
+                }
+                return@setOnKeyListener true
+            }
+            if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER || keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER) {
+                if (event.action == KeyEvent.ACTION_UP) {
+                    showKeyboard(etDeviceName)
+                }
+                return@setOnKeyListener true
+            }
+            false
+        }
+
+        // D-Pad Navigation for etDeviceIp: Jump immediately to adjacent views
+        etDeviceIp.setOnKeyListener { _, keyCode, event ->
+            if (keyCode in dpadNavKeys) {
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    hideKeyboard(etDeviceIp)
+                    when (keyCode) {
+                        KeyEvent.KEYCODE_DPAD_UP -> etDeviceName.requestFocus()
+                        KeyEvent.KEYCODE_DPAD_DOWN -> btnSelectFixtureMode.requestFocus()
+                        KeyEvent.KEYCODE_DPAD_RIGHT -> btnPingDevice.requestFocus()
+                        KeyEvent.KEYCODE_DPAD_LEFT -> { /* Keep focus without cursor stepping */ }
+                    }
+                }
+                return@setOnKeyListener true
+            }
+            if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER || keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER) {
+                if (event.action == KeyEvent.ACTION_UP) {
+                    showKeyboard(etDeviceIp)
+                }
+                return@setOnKeyListener true
+            }
+            false
+        }
+
+        // D-Pad Navigation for btnPingDevice
+        btnPingDevice.setOnKeyListener { _, keyCode, event ->
+            if (keyCode in dpadNavKeys) {
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    when (keyCode) {
+                        KeyEvent.KEYCODE_DPAD_LEFT -> etDeviceIp.requestFocus()
+                        KeyEvent.KEYCODE_DPAD_UP -> etDeviceName.requestFocus()
+                        KeyEvent.KEYCODE_DPAD_DOWN -> btnSelectFixtureMode.requestFocus()
+                        KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                            if (cardCalibrationSettings.visibility == View.VISIBLE) {
+                                cardCalibrationSettings.requestFocus()
+                            } else if (cardPerimeterSettings.visibility == View.VISIBLE) {
+                                cardPerimeterSettings.requestFocus()
+                            }
+                        }
+                    }
+                }
+                return@setOnKeyListener true
+            }
+            false
+        }
+
+        // D-Pad Navigation for btnSelectFixtureMode
+        btnSelectFixtureMode.setOnKeyListener { _, keyCode, event ->
+            if (keyCode in dpadNavKeys) {
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    when (keyCode) {
+                        KeyEvent.KEYCODE_DPAD_UP -> etDeviceIp.requestFocus()
+                        KeyEvent.KEYCODE_DPAD_DOWN -> {
+                            if (btnSelectPosition.visibility == View.VISIBLE) {
+                                btnSelectPosition.requestFocus()
+                            } else {
+                                btnCancelEdit.requestFocus()
+                            }
+                        }
+                        KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                            if (cardCalibrationSettings.visibility == View.VISIBLE) {
+                                cardCalibrationSettings.requestFocus()
+                            } else if (cardPerimeterSettings.visibility == View.VISIBLE) {
+                                cardPerimeterSettings.requestFocus()
+                            }
+                        }
+                        KeyEvent.KEYCODE_DPAD_LEFT -> { /* Stay */ }
+                    }
+                }
+                return@setOnKeyListener true
+            }
+            false
+        }
+
+        // D-Pad Navigation for btnSelectPosition
+        btnSelectPosition.setOnKeyListener { _, keyCode, event ->
+            if (keyCode in dpadNavKeys) {
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    when (keyCode) {
+                        KeyEvent.KEYCODE_DPAD_UP -> btnSelectFixtureMode.requestFocus()
+                        KeyEvent.KEYCODE_DPAD_DOWN -> btnCancelEdit.requestFocus()
+                        KeyEvent.KEYCODE_DPAD_RIGHT -> cardCalibrationSettings.requestFocus()
+                        KeyEvent.KEYCODE_DPAD_LEFT -> { /* Stay */ }
+                    }
+                }
+                return@setOnKeyListener true
+            }
+            false
+        }
+
+        // D-Pad Navigation for cardPerimeterSettings
+        cardPerimeterSettings.setOnKeyListener { _, keyCode, event ->
+            if (keyCode in dpadNavKeys) {
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    when (keyCode) {
+                        KeyEvent.KEYCODE_DPAD_LEFT -> etDeviceName.requestFocus()
+                        KeyEvent.KEYCODE_DPAD_DOWN -> cardCalibrationSettings.requestFocus()
+                        KeyEvent.KEYCODE_DPAD_UP -> btnIdentifyDevice.requestFocus()
+                        KeyEvent.KEYCODE_DPAD_RIGHT -> { /* Stay */ }
+                    }
+                }
+                return@setOnKeyListener true
+            }
+            false
+        }
+
+        // D-Pad Navigation for cardCalibrationSettings
+        cardCalibrationSettings.setOnKeyListener { _, keyCode, event ->
+            if (keyCode in dpadNavKeys) {
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    when (keyCode) {
+                        KeyEvent.KEYCODE_DPAD_LEFT -> btnPingDevice.requestFocus()
+                        KeyEvent.KEYCODE_DPAD_UP -> {
+                            if (cardPerimeterSettings.visibility == View.VISIBLE) {
+                                cardPerimeterSettings.requestFocus()
+                            } else {
+                                etDeviceName.requestFocus()
+                            }
+                        }
+                        KeyEvent.KEYCODE_DPAD_DOWN -> btnSaveEdit.requestFocus()
+                        KeyEvent.KEYCODE_DPAD_RIGHT -> { /* Stay */ }
+                    }
+                }
+                return@setOnKeyListener true
+            }
+            false
+        }
+
+        // D-Pad Navigation for btnCancelEdit
+        btnCancelEdit.setOnKeyListener { _, keyCode, event ->
+            if (keyCode in dpadNavKeys) {
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    when (keyCode) {
+                        KeyEvent.KEYCODE_DPAD_UP -> {
+                            if (btnSelectPosition.visibility == View.VISIBLE) {
+                                btnSelectPosition.requestFocus()
+                            } else {
+                                btnSelectFixtureMode.requestFocus()
+                            }
+                        }
+                        KeyEvent.KEYCODE_DPAD_RIGHT -> btnSaveEdit.requestFocus()
+                        KeyEvent.KEYCODE_DPAD_LEFT -> { /* Stay */ }
+                        KeyEvent.KEYCODE_DPAD_DOWN -> { /* Stay */ }
+                    }
+                }
+                return@setOnKeyListener true
+            }
+            false
+        }
+
+        // D-Pad Navigation for btnSaveEdit
+        btnSaveEdit.setOnKeyListener { _, keyCode, event ->
+            if (keyCode in dpadNavKeys) {
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    when (keyCode) {
+                        KeyEvent.KEYCODE_DPAD_UP -> cardCalibrationSettings.requestFocus()
+                        KeyEvent.KEYCODE_DPAD_LEFT -> btnCancelEdit.requestFocus()
+                        KeyEvent.KEYCODE_DPAD_RIGHT -> { /* Stay */ }
+                        KeyEvent.KEYCODE_DPAD_DOWN -> { /* Stay */ }
+                    }
+                }
+                return@setOnKeyListener true
+            }
+            false
+        }
+
+        // D-Pad Navigation for btnIdentifyDevice
+        btnIdentifyDevice.setOnKeyListener { _, keyCode, event ->
+            if (keyCode in dpadNavKeys) {
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    when (keyCode) {
+                        KeyEvent.KEYCODE_DPAD_LEFT -> etDeviceName.requestFocus()
+                        KeyEvent.KEYCODE_DPAD_DOWN -> {
+                            if (cardPerimeterSettings.visibility == View.VISIBLE) {
+                                cardPerimeterSettings.requestFocus()
+                            } else {
+                                cardCalibrationSettings.requestFocus()
+                            }
+                        }
+                        KeyEvent.KEYCODE_DPAD_UP -> { /* Stay */ }
+                        KeyEvent.KEYCODE_DPAD_RIGHT -> { /* Stay */ }
+                    }
+                }
+                return@setOnKeyListener true
+            }
+            false
+        }
+
+        etDeviceName.requestFocus()
     }
 
     private fun populateUi() {
