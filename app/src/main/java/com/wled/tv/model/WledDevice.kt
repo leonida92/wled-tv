@@ -20,12 +20,14 @@ data class WledDevice(
     val port: Int = 21324,
     val enabled: Boolean = true,
     val type: DeviceType = DeviceType.PERIMETER,
-    val colorOrder: String = "RGB",
     val ledCount: Int = 1,                              // For spot lights / ambient fixtures
     val perimeter: PerimeterConfig = PerimeterConfig(), // For 4-sided perimeter strips
     val calibration: ColorCalibration = ColorCalibration(), // Per-device optical/color calibration
     val customRect: RectF = RectF(0f, 0f, 1f, 1f)       // For custom boxes
 ) {
+    val colorOrder: String
+        get() = calibration.colorOrder
+
     val totalLeds: Int
         get() = when (type) {
             DeviceType.PERIMETER -> perimeter.totalLeds

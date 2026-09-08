@@ -34,39 +34,8 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
-                android:text="Configure capture performance, startup behavior, and application updates"
+                android:text="Configure screen zones, calibration, light setup, capture performance, and updates"
                 style="@style/TvBody" />
-        </LinearLayout>
-
-        <!-- Live Connection Status Pill -->
-        <LinearLayout
-            android:id="@+id/layoutConnectionPill"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:background="@drawable/bg_card"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:paddingStart="16dp"
-            android:paddingTop="8dp"
-            android:paddingEnd="16dp"
-            android:paddingBottom="8dp">
-
-            <View
-                android:id="@+id/viewSystemStatusDot"
-                android:layout_width="10dp"
-                android:layout_height="10dp"
-                android:background="@drawable/bg_status_dot"
-                android:backgroundTint="@color/accent_green" />
-
-            <TextView
-                android:id="@+id/tvSystemStatusText"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="10dp"
-                android:text="Checking..."
-                android:textColor="@color/text_primary"
-                android:textSize="14sp"
-                android:textStyle="bold" />
         </LinearLayout>
     </LinearLayout>
 
@@ -81,7 +50,95 @@
             android:layout_height="wrap_content"
             android:orientation="vertical">
 
-            <!-- Card 1: Capture Frame Rate -->
+            <!-- Card 1: Screen Zones & Crop -->
+            <LinearLayout
+                android:id="@+id/itemScreenZonesSetting"
+                style="@style/TvSettingItem"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <ImageView
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:src="@drawable/ic_crop"
+                    app:tint="@color/text_secondary" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="16dp"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/btn_zone_editor"
+                        style="@style/TvSettingTitle" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Letterbox crop margins and sampling regions"
+                        style="@style/TvSettingSub" />
+                </LinearLayout>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Open"
+                    android:textColor="@color/accent_cyan"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <!-- Card 2: Light Setup & Devices -->
+            <LinearLayout
+                android:id="@+id/itemDeviceManagerSetting"
+                style="@style/TvSettingItem"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <ImageView
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:src="@drawable/ic_tv"
+                    app:tint="@color/text_secondary" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="16dp"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/btn_settings"
+                        style="@style/TvSettingTitle" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Manage controllers, IP addresses, and lighting roles"
+                        style="@style/TvSettingSub" />
+                </LinearLayout>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Open"
+                    android:textColor="@color/accent_cyan"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <!-- Card 3: Capture Frame Rate -->
             <LinearLayout
                 android:id="@+id/itemFpsSetting"
                 style="@style/TvSettingItem"
@@ -91,15 +148,15 @@
                 android:orientation="horizontal">
 
                 <ImageView
-                    android:layout_width="32dp"
-                    android:layout_height="32dp"
-                    android:src="@drawable/ic_sparkle"
-                    app:tint="@color/accent_amber" />
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:src="@drawable/ic_speed"
+                    app:tint="@color/text_secondary" />
 
                 <LinearLayout
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="20dp"
+                    android:layout_marginStart="16dp"
                     android:layout_weight="1"
                     android:orientation="vertical">
 
@@ -112,34 +169,34 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="@string/pref_fps_desc"
+                        android:text="Frame sampling rate and processing performance"
                         style="@style/TvSettingSub" />
                 </LinearLayout>
 
                 <ImageView
-                    android:layout_width="28dp"
-                    android:layout_height="28dp"
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
                     android:src="@drawable/ic_arrow_left"
-                    app:tint="@color/accent_blue" />
+                    app:tint="@color/text_secondary" />
 
                 <TextView
                     android:id="@+id/tvSystemFpsValue"
-                    android:layout_width="90dp"
+                    android:layout_width="74dp"
                     android:layout_height="wrap_content"
                     android:gravity="center"
                     android:text="60 FPS"
                     android:textColor="@color/accent_cyan"
-                    android:textSize="18sp"
+                    android:textSize="15sp"
                     android:textStyle="bold" />
 
                 <ImageView
-                    android:layout_width="28dp"
-                    android:layout_height="28dp"
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
                     android:src="@drawable/ic_arrow_right"
-                    app:tint="@color/accent_blue" />
+                    app:tint="@color/text_secondary" />
             </LinearLayout>
 
-            <!-- Card 2: Auto-Start on Boot -->
+            <!-- Card 4: Auto-Start on Boot -->
             <LinearLayout
                 android:id="@+id/itemAutoStartSetting"
                 style="@style/TvSettingItem"
@@ -149,15 +206,15 @@
                 android:orientation="horizontal">
 
                 <ImageView
-                    android:layout_width="32dp"
-                    android:layout_height="32dp"
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
                     android:src="@drawable/ic_power"
-                    app:tint="@color/accent_green" />
+                    app:tint="@color/text_secondary" />
 
                 <LinearLayout
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="20dp"
+                    android:layout_marginStart="16dp"
                     android:layout_weight="1"
                     android:orientation="vertical">
 
@@ -170,7 +227,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="@string/pref_auto_start_desc"
+                        android:text="Start ambient capture automatically on TV boot"
                         style="@style/TvSettingSub" />
                 </LinearLayout>
 
@@ -178,18 +235,18 @@
                     android:id="@+id/tvSystemAutoStartValue"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:background="@drawable/bg_card_focused"
-                    android:paddingStart="16dp"
-                    android:paddingTop="6dp"
-                    android:paddingEnd="16dp"
-                    android:paddingBottom="6dp"
+                    android:background="@drawable/bg_pill_button"
+                    android:paddingStart="14dp"
+                    android:paddingTop="5dp"
+                    android:paddingEnd="14dp"
+                    android:paddingBottom="5dp"
                     android:text="Disabled"
-                    android:textColor="@color/text_primary"
-                    android:textSize="14sp"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="13sp"
                     android:textStyle="bold" />
             </LinearLayout>
 
-            <!-- Card 3: Check for Updates -->
+            <!-- Card 5: Check for Updates -->
             <LinearLayout
                 android:id="@+id/itemCheckUpdateSetting"
                 style="@style/TvSettingItem"
@@ -199,15 +256,15 @@
                 android:orientation="horizontal">
 
                 <ImageView
-                    android:layout_width="32dp"
-                    android:layout_height="32dp"
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
                     android:src="@drawable/ic_tv"
-                    app:tint="@color/accent_cyan" />
+                    app:tint="@color/text_secondary" />
 
                 <LinearLayout
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="20dp"
+                    android:layout_marginStart="16dp"
                     android:layout_weight="1"
                     android:orientation="vertical">
 
@@ -229,7 +286,7 @@
                     android:id="@+id/tvUpdateActionText"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="[OK] Check Now"
+                    android:text="Check Now"
                     android:textColor="@color/accent_cyan"
                     android:textSize="13sp"
                     android:textStyle="bold" />

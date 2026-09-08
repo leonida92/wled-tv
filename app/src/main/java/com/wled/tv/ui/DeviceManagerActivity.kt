@@ -2,6 +2,7 @@ package com.wled.tv.ui
 
 import android.app.AlertDialog
 import android.content.Intent
+import android.content.res.ColorStateList
 import android.graphics.Color
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -18,6 +19,7 @@ import com.wled.tv.data.PreferencesRepository
 import com.wled.tv.model.DeviceType
 import com.wled.tv.model.WledConfig
 import com.wled.tv.model.WledDevice
+import com.wled.tv.network.DeviceReachabilityCache
 import com.wled.tv.network.DiscoveredWled
 import com.wled.tv.network.WledDiscovery
 import com.wled.tv.network.WledHttpClient
@@ -28,6 +30,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.util.concurrent.ConcurrentHashMap
 
 class DeviceManagerActivity : AppCompatActivity() {
 
@@ -42,6 +46,8 @@ class DeviceManagerActivity : AppCompatActivity() {
     private val udpSender = WledUdpSender()
     private val httpClient = WledHttpClient()
     private var testJob: Job? = null
+    private var pingPollingJob: Job? = null
+    private val deviceReachabilityMap get() = DeviceReachabilityCache.map
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -59,6 +65,13 @@ class DeviceManagerActivity : AppCompatActivity() {
         super.onResume()
         config = prefsRepo.loadConfig()
         renderDeviceList()
+        startPingPolling()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        pingPollingJob?.cancel()
+        pingPollingJob = null
     }
 
     override fun onDestroy() {
@@ -89,6 +102,37 @@ class DeviceManagerActivity : AppCompatActivity() {
         }
     }
 
+    private fun startPingPolling() {
+        pingPollingJob?.cancel()
+        pingPollingJob = lifecycleScope.launch {
+            while (isActive) {
+                for (dev in config.devices) {
+                    launch(Dispatchers.IO) {
+                        val reachable = httpClient.checkConnection(dev.ip)
+                        deviceReachabilityMap[dev.id] = reachable
+                        withContext(Dispatchers.Main) {
+                            updateDeviceDot(dev.id, dev.enabled, reachable)
+                        }
+                    }
+                }
+                delay(5000)
+            }
+        }
+    }
+
+    private fun updateDeviceDot(deviceId: String, enabled: Boolean, reachable: Boolean?) {
+        val viewDot = layoutDeviceList.findViewWithTag<View>("dot_$deviceId") ?: return
+        if (!enabled) {
+            viewDot.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#475569"))
+        } else {
+            when (reachable) {
+                true -> viewDot.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#00E676"))
+                false -> viewDot.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#EF4444"))
+                null -> viewDot.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#64748B"))
+            }
+        }
+    }
+
     private fun renderDeviceList() {
         layoutDeviceList.removeAllViews()
 
@@ -116,14 +160,20 @@ class DeviceManagerActivity : AppCompatActivity() {
             }
             tvDetails.text = "${device.ip}:${device.port} | $extraDetails | ${device.calibration.colorOrder} | Bri: $briPct%"
 
-            if (device.enabled) {
-                viewDot.setBackgroundResource(R.drawable.bg_status_dot)
-                btnToggle.text = "ON"
-                btnToggle.setTextColor(Color.parseColor("#00E676"))
-            } else {
-                viewDot.setBackgroundColor(Color.parseColor("#64748B"))
+            viewDot.tag = "dot_${device.id}"
+
+            if (!device.enabled) {
+                viewDot.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#475569"))
                 btnToggle.text = "OFF"
                 btnToggle.setTextColor(Color.parseColor("#94A3B8"))
+            } else {
+                when (deviceReachabilityMap[device.id]) {
+                    true -> viewDot.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#00E676"))
+                    false -> viewDot.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#EF4444"))
+                    null -> viewDot.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#64748B"))
+                }
+                btnToggle.text = "ON"
+                btnToggle.setTextColor(Color.parseColor("#00E676"))
             }
 
             btnToggle.setOnClickListener {
@@ -136,17 +186,22 @@ class DeviceManagerActivity : AppCompatActivity() {
                 saveAndUpdate()
 
                 if (newEnabled) {
-                    viewDot.setBackgroundResource(R.drawable.bg_status_dot)
                     btnToggle.text = "ON"
                     btnToggle.setTextColor(Color.parseColor("#00E676"))
+                    updateDeviceDot(updatedDevice.id, true, deviceReachabilityMap[updatedDevice.id])
                 } else {
-                    viewDot.setBackgroundColor(Color.parseColor("#64748B"))
                     btnToggle.text = "OFF"
                     btnToggle.setTextColor(Color.parseColor("#94A3B8"))
+                    updateDeviceDot(updatedDevice.id, false, null)
                 }
 
                 lifecycleScope.launch(Dispatchers.IO) {
                     if (newEnabled) {
+                        val reachable = httpClient.checkConnection(updatedDevice.ip)
+                        deviceReachabilityMap[updatedDevice.id] = reachable
+                        withContext(Dispatchers.Main) {
+                            updateDeviceDot(updatedDevice.id, true, reachable)
+                        }
                         httpClient.wakeAndSetBrightness(updatedDevice.ip, updatedDevice.calibration.maxBrightness)
                     } else {
                         val totalLeds = updatedDevice.totalLeds

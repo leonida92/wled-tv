@@ -1,9 +1,12 @@
 package com.wled.tv.ui
 
 import android.app.AlertDialog
+import android.content.Intent
+import android.content.res.ColorStateList
 import android.graphics.Color
 import android.os.Bundle
 import android.view.KeyEvent
+import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -15,7 +18,6 @@ import com.wled.tv.BuildConfig
 import com.wled.tv.R
 import com.wled.tv.data.PreferencesRepository
 import com.wled.tv.model.WledConfig
-import com.wled.tv.network.WledHttpClient
 import com.wled.tv.service.AmbientCaptureService
 import com.wled.tv.updater.GitHubUpdateManager
 import com.wled.tv.updater.UpdateInfo
@@ -24,11 +26,10 @@ class SystemSettingsActivity : AppCompatActivity() {
 
     private lateinit var prefsRepo: PreferencesRepository
     private var config: WledConfig = WledConfig()
-    private val httpClient = WledHttpClient()
     private val updateManager = GitHubUpdateManager()
 
-    private lateinit var viewSystemStatusDot: android.view.View
-    private lateinit var tvSystemStatusText: TextView
+    private lateinit var itemScreenZonesSetting: LinearLayout
+    private lateinit var itemDeviceManagerSetting: LinearLayout
 
     private lateinit var itemFpsSetting: LinearLayout
     private lateinit var tvSystemFpsValue: TextView
@@ -50,12 +51,11 @@ class SystemSettingsActivity : AppCompatActivity() {
         bindViews()
         setupListeners()
         updateUiValues()
-        checkConnection()
     }
 
     private fun bindViews() {
-        viewSystemStatusDot = findViewById(R.id.viewSystemStatusDot)
-        tvSystemStatusText = findViewById(R.id.tvSystemStatusText)
+        itemScreenZonesSetting = findViewById(R.id.itemScreenZonesSetting)
+        itemDeviceManagerSetting = findViewById(R.id.itemDeviceManagerSetting)
 
         itemFpsSetting = findViewById(R.id.itemFpsSetting)
         tvSystemFpsValue = findViewById(R.id.tvSystemFpsValue)
@@ -67,10 +67,18 @@ class SystemSettingsActivity : AppCompatActivity() {
         tvAppVersionSummary = findViewById(R.id.tvAppVersionSummary)
         tvUpdateActionText = findViewById(R.id.tvUpdateActionText)
 
-        itemFpsSetting.requestFocus()
+        itemScreenZonesSetting.requestFocus()
     }
 
     private fun setupListeners() {
+        itemScreenZonesSetting.setOnClickListener {
+            startActivity(Intent(this, ZoneEditorActivity::class.java))
+        }
+
+        itemDeviceManagerSetting.setOnClickListener {
+            startActivity(Intent(this, DeviceManagerActivity::class.java))
+        }
+
         itemFpsSetting.setOnClickListener { cycleFps() }
         itemFpsSetting.setOnKeyListener { _, keyCode, event ->
             if (event.action == KeyEvent.ACTION_DOWN && (keyCode == KeyEvent.KEYCODE_DPAD_LEFT || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT)) {
@@ -126,23 +134,6 @@ class SystemSettingsActivity : AppCompatActivity() {
         }
     }
 
-    private fun checkConnection() {
-        viewSystemStatusDot.setBackgroundColor(Color.parseColor("#FBBF24"))
-        tvSystemStatusText.text = "Pinging..."
-
-        lifecycleScope.launch(Dispatchers.IO) {
-            val connected = httpClient.checkConnection(config.ip)
-            launch(Dispatchers.Main) {
-                if (connected) {
-                    viewSystemStatusDot.setBackgroundColor(Color.parseColor("#00E676"))
-                    tvSystemStatusText.text = "Connected (${config.ip})"
-                } else {
-                    viewSystemStatusDot.setBackgroundColor(Color.parseColor("#F87171"))
-                    tvSystemStatusText.text = "Offline / Unreachable"
-                }
-            }
-        }
-    }
 
     private fun performUpdateCheck() {
         tvUpdateActionText.text = "Checking..."

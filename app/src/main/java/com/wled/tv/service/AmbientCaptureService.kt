@@ -40,6 +40,7 @@ import com.wled.tv.processing.ScreenColorProcessor
 import com.wled.tv.ui.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicBoolean
@@ -500,7 +501,6 @@ class AmbientCaptureService : Service() {
         }
 
         blackoutAndPowerOffLeds()
-        udpSender.close()
         Log.i(TAG, "Ambient screen capture stopped")
     }
 
@@ -528,7 +528,7 @@ class AmbientCaptureService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("WLED TV Ambient Active")
             .setContentText("Streaming ambient bias lighting to ${config.enabledDevices.size} lights")
-            .setSmallIcon(R.drawable.ic_launcher)
+            .setSmallIcon(R.drawable.ic_tv)
             .setContentIntent(pendingIntent)
             .addAction(R.drawable.ic_power, "Stop", stopPendingIntent)
             .setOngoing(true)
@@ -570,6 +570,12 @@ class AmbientCaptureService : Service() {
             wakeLock = null
         } catch (_: Exception) {}
         stopCapture()
+        try {
+            udpSender.close()
+        } catch (_: Exception) {}
+        try {
+            serviceScope.cancel()
+        } catch (_: Exception) {}
         if (currentServiceInstance == this) {
             currentServiceInstance = null
         }

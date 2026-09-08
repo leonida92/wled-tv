@@ -14,16 +14,16 @@ It captures on-screen video in real time, extracts rich chroma-weighted edge and
 ## Screenshots
 
 <p align="center">
-  <img src="media/dashboard.png" alt="WLED TV Main Dashboard and Live Simulation" width="100%" />
+  <img src="media/dashboard.png?v=1.2.0" alt="WLED TV Main Dashboard and Live Simulation" width="100%" />
 </p>
 
 | Light Setup &amp; Device Fleet | Configure Light &amp; Network Ping |
 | :---: | :---: |
-| <img src="media/devices.png" width="100%" alt="Light Setup and Device Fleet" /> | <img src="media/edit_device.png" width="100%" alt="Configure Light and Network Ping" /> |
+| <img src="media/devices.png?v=1.2.0" width="100%" alt="Light Setup and Device Fleet" /> | <img src="media/edit_device.png?v=1.2.0" width="100%" alt="Configure Light and Network Ping" /> |
 | **Visual Zone &amp; Aspect Calibration** | **Color &amp; Optical Calibration** |
-| <img src="media/zones.png" width="100%" alt="Visual Screen Zone and Aspect Ratio Calibration" /> | <img src="media/calibration.png" width="100%" alt="Color and Performance Calibration" /> |
+| <img src="media/zones.png?v=1.2.0" width="100%" alt="Visual Screen Zone and Aspect Ratio Calibration" /> | <img src="media/calibration.png?v=1.2.0" width="100%" alt="Color and Performance Calibration" /> |
 | **Strip Perimeter Geometry** | **System &amp; Performance Settings** |
-| <img src="media/perimeter.png" width="100%" alt="Perimeter Strip Geometry" /> | <img src="media/system.png" width="100%" alt="System and Connection Settings" /> |
+| <img src="media/perimeter.png?v=1.2.0" width="100%" alt="Perimeter Strip Geometry" /> | <img src="media/system.png?v=1.2.0" width="100%" alt="System and Connection Settings" /> |
 
 ---
 
@@ -87,12 +87,12 @@ It captures on-screen video in real time, extracts rich chroma-weighted edge and
 2. Connect from your computer:
    ```bash
    adb connect <TV_IP_ADDRESS>:5555
-   adb install -r app-release.apk
+   adb install -r wled-tv-v1.2.0.apk
    ```
 
 ### Method 2: Sideload via USB or "Send Files to TV"
 1. Install **Send Files to TV** and a file manager from the Google TV Play Store.
-2. Send `app-release.apk` to your TV and open it to install.
+2. Send `wled-tv-v1.2.0.apk` to your TV and open it to install.
 
 ---
 
@@ -102,8 +102,9 @@ It captures on-screen video in real time, extracts rich chroma-weighted edge and
 2. **Setup Lights and Devices**:
    - Open **Light Setup & Devices**.
    - Use **Scan LAN for WLED** or click **+ Add Light** to add your fixtures.
-   - For your TV perimeter strip, click **Configure** -> **Configure Strip Perimeter** to set Top, Right, Bottom, and Left LED counts, Start Corner, and Wiring Direction.
-   - For side lamps, uplights, or room ambient fixtures, select the appropriate **Screen Region / Role** and calibrate color, brightness, and gains.
+   - For your TV perimeter strip, click **Configure** -> **Perimeter Geometry** to set Top, Right, Bottom, and Left LED counts, Start Corner, and Wiring Direction.
+   - For color balance, white point, and gains, click **Configure** -> **Color & Calibration**.
+   - For side lamps, uplights, or room ambient fixtures, select the appropriate **Screen Region / Role** and calibrate brightness and gains.
 3. **Adjust Perimeter Zones and Aspect Ratios**:
    - Open **Screen Zones & Crop** to align capture sampling boxes or enable **Auto-Detect** for real-time letterbox tracking.
 4. **Start Ambient Light**:
@@ -155,8 +156,8 @@ cd wled-tv
 ./gradlew assembleDebug
 
 # Output APKs located at:
-# app/build/outputs/apk/release/app-release.apk
-# app/build/outputs/apk/debug/app-debug.apk
+# app/build/outputs/apk/release/wled-tv-v1.2.0-release.apk
+# app/build/outputs/apk/debug/wled-tv-v1.2.0-debug.apk
 ```
 
 ---

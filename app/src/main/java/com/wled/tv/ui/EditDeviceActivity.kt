@@ -18,7 +18,9 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.wled.tv.R
 import com.wled.tv.data.PreferencesRepository
+import com.wled.tv.model.Corner
 import com.wled.tv.model.DeviceType
+import com.wled.tv.model.Direction
 import com.wled.tv.model.WledConfig
 import com.wled.tv.model.WledDevice
 import com.wled.tv.network.WledHttpClient
@@ -56,6 +58,7 @@ class EditDeviceActivity : AppCompatActivity() {
     private lateinit var cardCalibrationSettings: LinearLayout
     private lateinit var tvCalibrationSummary: TextView
 
+    private lateinit var btnDeleteDevice: Button
     private lateinit var btnCancelEdit: Button
     private lateinit var btnSaveEdit: Button
 
@@ -106,7 +109,6 @@ class EditDeviceActivity : AppCompatActivity() {
                 port = 21324,
                 enabled = true,
                 type = initialType,
-                colorOrder = config.calibration.colorOrder,
                 ledCount = if (initialType == DeviceType.PERIMETER) 168 else 1,
                 calibration = config.calibration
             )
@@ -158,11 +160,16 @@ class EditDeviceActivity : AppCompatActivity() {
         cardCalibrationSettings = findViewById(R.id.cardCalibrationSettings)
         tvCalibrationSummary = findViewById(R.id.tvCalibrationSummary)
 
+        btnDeleteDevice = findViewById(R.id.btnDeleteDevice)
         btnCancelEdit = findViewById(R.id.btnCancelEdit)
         btnSaveEdit = findViewById(R.id.btnSaveEdit)
     }
 
     private fun setupListeners() {
+        btnDeleteDevice.setOnClickListener {
+            confirmDeleteDevice()
+        }
+
         btnIdentifyDevice.setOnClickListener {
             identifyDevice()
         }
@@ -467,6 +474,28 @@ class EditDeviceActivity : AppCompatActivity() {
             false
         }
 
+        // D-Pad Navigation for btnDeleteDevice
+        btnDeleteDevice.setOnKeyListener { _, keyCode, event ->
+            if (keyCode in dpadNavKeys) {
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    when (keyCode) {
+                        KeyEvent.KEYCODE_DPAD_UP -> {
+                            if (btnSelectPosition.visibility == View.VISIBLE) {
+                                btnSelectPosition.requestFocus()
+                            } else {
+                                btnSelectFixtureMode.requestFocus()
+                            }
+                        }
+                        KeyEvent.KEYCODE_DPAD_RIGHT -> btnCancelEdit.requestFocus()
+                        KeyEvent.KEYCODE_DPAD_LEFT -> { /* Stay */ }
+                        KeyEvent.KEYCODE_DPAD_DOWN -> { /* Stay */ }
+                    }
+                }
+                return@setOnKeyListener true
+            }
+            false
+        }
+
         // D-Pad Navigation for btnCancelEdit
         btnCancelEdit.setOnKeyListener { _, keyCode, event ->
             if (keyCode in dpadNavKeys) {
@@ -480,7 +509,11 @@ class EditDeviceActivity : AppCompatActivity() {
                             }
                         }
                         KeyEvent.KEYCODE_DPAD_RIGHT -> btnSaveEdit.requestFocus()
-                        KeyEvent.KEYCODE_DPAD_LEFT -> { /* Stay */ }
+                        KeyEvent.KEYCODE_DPAD_LEFT -> {
+                            if (btnDeleteDevice.visibility == View.VISIBLE) {
+                                btnDeleteDevice.requestFocus()
+                            }
+                        }
                         KeyEvent.KEYCODE_DPAD_DOWN -> { /* Stay */ }
                     }
                 }
@@ -532,6 +565,7 @@ class EditDeviceActivity : AppCompatActivity() {
 
     private fun populateUi() {
         tvEditTitle.text = if (isNewDevice) "Add New Light Device" else "Configure ${currentDevice.name}"
+        btnDeleteDevice.visibility = if (isNewDevice) View.GONE else View.VISIBLE
         etDeviceName.setText(currentDevice.name)
         etDeviceIp.setText(currentDevice.ip)
 
@@ -554,15 +588,25 @@ class EditDeviceActivity : AppCompatActivity() {
 
     private fun updateSummaries() {
         val p = currentDevice.perimeter
-        val letterboxStr = if (p.autoLetterbox) " • Auto-Letterbox ON" else ""
-        tvPerimeterSummary.text = "${p.topLeds} Top / ${p.rightLeds} Right / ${p.bottomLeds} Bottom / ${p.leftLeds} Left (${p.totalLeds} LEDs, ${p.startCorner.name}, ${p.direction.name}$letterboxStr)"
+        val letterboxStr = if (p.autoLetterbox) " • Auto-Crop" else ""
+        val corner = when (p.startCorner) {
+            Corner.BOTTOM_LEFT -> "Bottom-Left"
+            Corner.BOTTOM_RIGHT -> "Bottom-Right"
+            Corner.TOP_LEFT -> "Top-Left"
+            Corner.TOP_RIGHT -> "Top-Right"
+        }
+        val dir = when (p.direction) {
+            Direction.CLOCKWISE -> "Clockwise"
+            Direction.COUNTER_CLOCKWISE -> "Counter-Clockwise"
+        }
+        tvPerimeterSummary.text = "${p.totalLeds} LEDs • ${p.topLeds}T / ${p.rightLeds}R / ${p.bottomLeds}B / ${p.leftLeds}L\n$corner • $dir$letterboxStr"
 
         val c = currentDevice.calibration
         val briPct = ((c.maxBrightness / 255f) * 100).toInt()
         tvCalibrationSummary.text = String.format(
             Locale.US,
-            "Brightness %d%%, Order %s, Saturation %.1fx, Smoothing %.2f, Gains (R:%.2f G:%.2f B:%.2f)",
-            briPct, c.colorOrder, c.saturation, c.smoothingFactor, c.gainR, c.gainG, c.gainB
+            "Brightness %d%% • Order %s\nSaturation %.1fx • Smoothing %.2f",
+            briPct, c.colorOrder, c.saturation, c.smoothingFactor
         )
     }
 
@@ -579,6 +623,52 @@ class EditDeviceActivity : AppCompatActivity() {
             config.copy(devices = config.devices + currentDevice)
         }
         prefsRepo.saveConfig(updated)
+    }
+
+    private fun confirmDeleteDevice() {
+        config = prefsRepo.loadConfig()
+        if (config.devices.size <= 1) {
+            AlertDialog.Builder(this)
+                .setTitle("Cannot Delete")
+                .setMessage("At least one light fixture must remain configured.")
+                .setPositiveButton("OK", null)
+                .show()
+            return
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Delete Light")
+            .setMessage("Are you sure you want to delete '${currentDevice.name}'?")
+            .setPositiveButton("Delete") { _, _ ->
+                val updatedDevices = config.devices.filter { it.id != currentDevice.id }
+                config = config.copy(devices = updatedDevices)
+                prefsRepo.saveConfig(config)
+                isSaved = true
+
+                lifecycleScope.launch(Dispatchers.IO) {
+                    val totalLeds = currentDevice.totalLeds
+                    if (totalLeds > 0) {
+                        udpSender.sendDrgbFrame(
+                            currentDevice.ip,
+                            currentDevice.port,
+                            2,
+                            ByteArray(totalLeds * 3),
+                            totalLeds,
+                            currentDevice.calibration.colorOrder
+                        )
+                    }
+                    httpClient.turnOff(currentDevice.ip)
+                }
+
+                if (AmbientCaptureService.isRunning) {
+                    AmbientCaptureService.currentServiceInstance?.reloadConfig()
+                }
+
+                Toast.makeText(this, "Deleted ${currentDevice.name}", Toast.LENGTH_SHORT).show()
+                finish()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun saveAndFinish() {

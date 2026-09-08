@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/cardDeviceRoot"
+    android:layout_width="wrap_content"
+    android:layout_height="52dp"
+    android:layout_marginEnd="12dp"
+    android:background="@drawable/bg_dock_card_selector"
+    android:clickable="true"
+    android:focusable="true"
+    android:focusableInTouchMode="true"
+    android:gravity="center_vertical"
+    android:minWidth="155dp"
+    android:orientation="horizontal"
+    android:paddingStart="16dp"
+    android:paddingTop="8dp"
+    android:paddingEnd="16dp"
+    android:paddingBottom="8dp">
+
+    <!-- Device Icon -->
+    <ImageView
+        android:id="@+id/ivDeviceIcon"
+        android:layout_width="20dp"
+        android:layout_height="20dp"
+        android:src="@drawable/ic_tv"
+        app:tint="@color/accent_cyan" />
+
+    <!-- Device Name -->
+    <TextView
+        android:id="@+id/tvDockDeviceName"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="12dp"
+        android:layout_marginEnd="14dp"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:textColor="@color/text_primary"
+        android:textSize="13sp"
+        android:textStyle="bold"
+        tools:text="TV Backlight" />
+
+    <!-- Active State Dot -->
+    <View
+        android:id="@+id/viewDockStatusDot"
+        android:layout_width="8dp"
+        android:layout_height="8dp"
+        android:background="@drawable/bg_status_dot"
+        android:backgroundTint="@color/text_muted" />
+
+</LinearLayout>

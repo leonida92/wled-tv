@@ -306,8 +306,7 @@ class CalibrationActivity : AppCompatActivity() {
     private fun updateTargetCalibration(newCalibration: ColorCalibration) {
         val dev = targetDevice
         val updatedDev = dev.copy(
-            calibration = newCalibration,
-            colorOrder = newCalibration.colorOrder
+            calibration = newCalibration
         )
         config = config.updateDevice(updatedDev)
         saveAndUpdate()

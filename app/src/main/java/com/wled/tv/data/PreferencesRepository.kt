@@ -82,7 +82,6 @@ class PreferencesRepository(context: Context) {
             port = port,
             enabled = true,
             type = DeviceType.PERIMETER,
-            colorOrder = globalCalibration.colorOrder,
             ledCount = perimeter.totalLeds,
             perimeter = perimeter,
             calibration = globalCalibration
@@ -155,7 +154,6 @@ class PreferencesRepository(context: Context) {
                         port = port,
                         enabled = enabled,
                         type = type,
-                        colorOrder = colorOrder,
                         ledCount = ledCount,
                         perimeter = perimeter,
                         calibration = devCalibration,

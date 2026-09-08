@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
-    <solid android:color="@color/surface_card_focused" />
-    <corners android:radius="16dp" />
+    <solid android:color="#20202C" />
+    <corners android:radius="20dp" />
     <stroke
         android:width="2dp"
-        android:color="@color/focus_border" />
+        android:color="#00E5FF" />
 </shape>

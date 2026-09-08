@@ -44,9 +44,9 @@
             android:id="@+id/btnIdentifyDevice"
             android:layout_width="wrap_content"
             android:layout_height="40dp"
-            android:background="@drawable/bg_card_selector"
-            android:paddingStart="16dp"
-            android:paddingEnd="16dp"
+            android:background="@drawable/bg_pill_selector"
+            android:paddingStart="18dp"
+            android:paddingEnd="18dp"
             android:text="Flash / Identify"
             android:textColor="@color/accent_cyan"
             android:textSize="12sp"
@@ -141,9 +141,9 @@
                         android:layout_width="wrap_content"
                         android:layout_height="44dp"
                         android:layout_marginStart="8dp"
-                        android:background="@drawable/bg_card_selector"
-                        android:paddingStart="14dp"
-                        android:paddingEnd="14dp"
+                        android:background="@drawable/bg_pill_selector"
+                        android:paddingStart="16dp"
+                        android:paddingEnd="16dp"
                         android:text="Ping Test"
                         android:textColor="@color/accent_cyan"
                         android:textSize="12sp"
@@ -225,37 +225,46 @@
                 android:id="@+id/cardPerimeterSettings"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginBottom="12dp"
-                android:background="@drawable/bg_card_selector"
+                android:layout_marginBottom="16dp"
+                android:background="@drawable/bg_dock_card_selector"
                 android:clickable="true"
                 android:focusable="true"
                 android:orientation="vertical"
-                android:padding="16dp">
+                android:padding="18dp">
 
-                <TextView
-                    android:layout_width="wrap_content"
+                <LinearLayout
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Strip Perimeter Geometry"
-                    android:textColor="@color/text_primary"
-                    android:textSize="15sp"
-                    android:textStyle="bold" />
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Perimeter Geometry"
+                        android:textColor="@color/text_primary"
+                        android:textSize="15sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Configure ›"
+                        android:textColor="@color/accent_cyan"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
 
                 <TextView
                     android:id="@+id/tvPerimeterSummary"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:text="54 Top / 30 Right / 54 Bottom / 30 Left (168 LEDs, BOTTOM_LEFT, CLOCKWISE)"
-                    android:textColor="@color/accent_cyan"
-                    android:textSize="12sp" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:text="Configure Top/Right/Bottom/Left LED counts, start corner, wiring direction, and auto-letterbox"
+                    android:layout_marginTop="10dp"
+                    android:lineSpacingExtra="4dp"
+                    android:text="168 LEDs • 54T / 30R / 54B / 30L\nBottom-Left • Clockwise"
                     android:textColor="@color/text_secondary"
-                    android:textSize="11sp" />
+                    android:textSize="13sp" />
             </LinearLayout>
 
             <!-- Color & Optical Calibration Card -->
@@ -263,54 +272,80 @@
                 android:id="@+id/cardCalibrationSettings"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:background="@drawable/bg_card_selector"
+                android:background="@drawable/bg_dock_card_selector"
                 android:clickable="true"
                 android:focusable="true"
                 android:orientation="vertical"
-                android:padding="16dp">
+                android:padding="18dp">
 
-                <TextView
-                    android:layout_width="wrap_content"
+                <LinearLayout
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Color &amp; Optical Calibration"
-                    android:textColor="@color/text_primary"
-                    android:textSize="15sp"
-                    android:textStyle="bold" />
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Color &amp; Calibration"
+                        android:textColor="@color/text_primary"
+                        android:textSize="15sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Configure ›"
+                        android:textColor="@color/accent_cyan"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
 
                 <TextView
                     android:id="@+id/tvCalibrationSummary"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:text="Saturation 1.2x, Brightness 100%, Smoothing 0.20, RGB"
-                    android:textColor="@color/accent_cyan"
-                    android:textSize="12sp" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:text="Adjust Max Brightness limit, Hardware Color Order (RGB/GRB/BGR), RGB gains, Gamma, Saturation, and EMA smoothing"
+                    android:layout_marginTop="10dp"
+                    android:lineSpacingExtra="4dp"
+                    android:text="Brightness 100% • Order RGB\nSaturation 1.2x • Smoothing 0.20"
                     android:textColor="@color/text_secondary"
-                    android:textSize="11sp" />
+                    android:textSize="13sp" />
             </LinearLayout>
 
         </LinearLayout>
     </LinearLayout>
 
-    <!-- Bottom Actions: Cancel & Save -->
+    <!-- Bottom Actions: Delete on left, Cancel and Save on right -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="12dp"
-        android:gravity="end|center_vertical"
+        android:gravity="center_vertical"
         android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/btnDeleteDevice"
+            android:layout_width="wrap_content"
+            android:layout_height="44dp"
+            android:background="@drawable/bg_pill_selector"
+            android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:text="Delete Light"
+            android:textColor="@color/accent_red"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <View
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
 
         <Button
             android:id="@+id/btnCancelEdit"
             android:layout_width="wrap_content"
             android:layout_height="44dp"
-            android:background="@drawable/bg_card_selector"
+            android:background="@drawable/bg_pill_selector"
             android:paddingStart="24dp"
             android:paddingEnd="24dp"
             android:text="Cancel"
@@ -323,11 +358,11 @@
             android:layout_width="wrap_content"
             android:layout_height="44dp"
             android:layout_marginStart="12dp"
-            android:background="@drawable/bg_power_button_on"
+            android:background="@drawable/bg_pill_selector"
             android:paddingStart="28dp"
             android:paddingEnd="28dp"
             android:text="Save Light"
-            android:textColor="@color/bg_tv_dark"
+            android:textColor="@color/status_active"
             android:textSize="13sp"
             android:textStyle="bold" />
     </LinearLayout>

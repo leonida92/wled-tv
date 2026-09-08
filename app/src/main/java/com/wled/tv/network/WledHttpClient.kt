@@ -103,3 +103,8 @@ class WledHttpClient {
         private const val TAG = "WledHttpClient"
     }
 }
+
+object DeviceReachabilityCache {
+    val map = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+}
+
