@@ -162,9 +162,13 @@ class SystemSettingsActivity : AppCompatActivity() {
             "\n\nRelease Notes:\n${updateInfo.releaseNotes}"
         } else ""
 
+        val apkDetail = if (updateInfo.apkName.isNotBlank()) {
+            "\nPackage: ${updateInfo.apkName}"
+        } else ""
+
         AlertDialog.Builder(this)
             .setTitle("Update Available: v${updateInfo.latestVersion}")
-            .setMessage("A new version of WLED TV is available on GitHub.$notes\n\nDownload and install now?")
+            .setMessage("A new version of WLED TV is available on GitHub.$apkDetail$notes\n\nDownload and install now?")
             .setPositiveButton("Download & Install") { _, _ ->
                 startDownloadAndInstall(updateInfo.downloadUrl)
             }

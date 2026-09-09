@@ -11,8 +11,8 @@ android {
         applicationId = "com.wled.tv"
         minSdk = 26
         targetSdk = 34
-        versionCode = 6
-        versionName = "1.2.0"
+        versionCode = 7
+        versionName = "1.2.1"
 
         vectorDrawables {
             useSupportLibrary = true
@@ -73,4 +73,5 @@ dependencies {
     implementation(libs.androidx.lifecycle.service)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.okhttp)
+    testImplementation("junit:junit:4.13.2")
 }

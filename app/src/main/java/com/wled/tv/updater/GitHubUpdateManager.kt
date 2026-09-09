@@ -20,7 +20,8 @@ data class UpdateInfo(
     val hasUpdate: Boolean,
     val latestVersion: String,
     val releaseNotes: String,
-    val downloadUrl: String
+    val downloadUrl: String,
+    val apkName: String = ""
 )
 
 class GitHubUpdateManager {
@@ -57,15 +58,26 @@ class GitHubUpdateManager {
                 val releaseNotes = json.optString("body", "").trim()
 
                 var apkDownloadUrl = ""
+                var selectedApkName = ""
                 val assets = json.optJSONArray("assets")
                 if (assets != null) {
+                    val candidateAssets = mutableListOf<Pair<String, String>>()
                     for (i in 0 until assets.length()) {
                         val asset = assets.getJSONObject(i)
                         val name = asset.optString("name", "")
-                        if (name.endsWith(".apk", ignoreCase = true)) {
-                            apkDownloadUrl = asset.optString("browser_download_url", "")
-                            break
+                        val downloadUrl = asset.optString("browser_download_url", "")
+                        if (name.isNotBlank() && downloadUrl.isNotBlank()) {
+                            candidateAssets.add(name to downloadUrl)
                         }
+                    }
+
+                    val selectedApk = selectReleaseApkAsset(candidateAssets)
+                    if (selectedApk != null) {
+                        selectedApkName = selectedApk.first
+                        apkDownloadUrl = selectedApk.second
+                        Log.i(TAG, "Selected release APK asset: $selectedApkName ($apkDownloadUrl)")
+                    } else {
+                        Log.w(TAG, "No suitable release APK found in release $tagName (candidates: ${candidateAssets.map { it.first }})")
                     }
                 }
 
@@ -74,7 +86,8 @@ class GitHubUpdateManager {
                     hasUpdate = isNewer && apkDownloadUrl.isNotBlank(),
                     latestVersion = cleanRemoteVersion,
                     releaseNotes = releaseNotes,
-                    downloadUrl = apkDownloadUrl
+                    downloadUrl = apkDownloadUrl,
+                    apkName = selectedApkName
                 )
             }
         } catch (e: Exception) {
@@ -153,7 +166,7 @@ class GitHubUpdateManager {
         }
     }
 
-    private fun isVersionNewer(remote: String, current: String): Boolean {
+    fun isVersionNewer(remote: String, current: String): Boolean {
         if (remote.isBlank() || current.isBlank()) return false
         if (remote == current) return false
 
@@ -168,6 +181,37 @@ class GitHubUpdateManager {
             if (r < c) return false
         }
         return false
+    }
+
+    /**
+     * Selects the release APK asset and explicitly rejects debug and unsigned APKs.
+     * Prioritization:
+     * 1. Assets ending with .apk that explicitly contain "release" (case-insensitive)
+     *    and do not contain "debug" or "unsigned".
+     * 2. Assets ending with .apk that do not contain "debug" or "unsigned" (e.g. wled-tv-v1.2.0.apk).
+     * Debug and unsigned APKs are strictly rejected to avoid installation failures.
+     */
+    fun selectReleaseApkAsset(assets: List<Pair<String, String>>): Pair<String, String>? {
+        val apkAssets = assets.filter { (name, url) ->
+            name.endsWith(".apk", ignoreCase = true) && url.isNotBlank()
+        }
+
+        // 1. Explicit release APK (e.g. wled-tv-v1.2.0-release.apk)
+        val explicitRelease = apkAssets.firstOrNull { (name, _) ->
+            name.contains("release", ignoreCase = true) &&
+                !name.contains("debug", ignoreCase = true) &&
+                !name.contains("unsigned", ignoreCase = true)
+        }
+        if (explicitRelease != null) return explicitRelease
+
+        // 2. Generic APK without "debug" or "unsigned"
+        val genericClean = apkAssets.firstOrNull { (name, _) ->
+            !name.contains("debug", ignoreCase = true) &&
+                !name.contains("unsigned", ignoreCase = true)
+        }
+        if (genericClean != null) return genericClean
+
+        return null
     }
 
     companion object {
