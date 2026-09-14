@@ -196,7 +196,65 @@
                     app:tint="@color/text_secondary" />
             </LinearLayout>
 
-            <!-- Card 4: Auto-Start on Boot -->
+            <!-- Card 4: Capture Resolution -->
+            <LinearLayout
+                android:id="@+id/itemResolutionSetting"
+                style="@style/TvSettingItem"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <ImageView
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:src="@drawable/ic_settings"
+                    app:tint="@color/text_secondary" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="16dp"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/pref_resolution"
+                        style="@style/TvSettingTitle" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/pref_resolution_desc"
+                        style="@style/TvSettingSub" />
+                </LinearLayout>
+
+                <ImageView
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:src="@drawable/ic_arrow_left"
+                    app:tint="@color/text_secondary" />
+
+                <TextView
+                    android:id="@+id/tvSystemResolutionValue"
+                    android:layout_width="120dp"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:text="320x180 (Std)"
+                    android:textColor="@color/accent_cyan"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+
+                <ImageView
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:src="@drawable/ic_arrow_right"
+                    app:tint="@color/text_secondary" />
+            </LinearLayout>
+
+            <!-- Card 5: Auto-Start on Boot -->
             <LinearLayout
                 android:id="@+id/itemAutoStartSetting"
                 style="@style/TvSettingItem"

@@ -70,6 +70,8 @@ class AmbientCaptureService : Service() {
     private var isScreenOff = AtomicBoolean(false)
     private var lastFrameTime = 0L
     private var lastSendTime = 0L
+    private var captureWidth = 320
+    private var captureHeight = 180
 
     private val keepaliveRunnable = object : Runnable {
         override fun run() {
@@ -259,10 +261,15 @@ class AmbientCaptureService : Service() {
     }
 
     fun reloadConfig() {
+        val oldWidth = captureWidth
+        val oldHeight = captureHeight
         config = prefsRepo.loadConfig()
         colorProcessor.reset()
         ensureWledAwake()
-        Log.i(TAG, "Config reloaded: ${config.enabledDevices.size} enabled devices, Saturation=${config.calibration.saturation}")
+        if (isCapturing.get() && (config.calibration.captureWidth != oldWidth || config.calibration.captureHeight != oldHeight)) {
+            reinitCaptureResolution(config.calibration.captureWidth, config.calibration.captureHeight)
+        }
+        Log.i(TAG, "Config reloaded: ${config.enabledDevices.size} enabled devices, Saturation=${config.calibration.saturation}, Resolution=${config.calibration.captureWidth}x${config.calibration.captureHeight}")
     }
 
     private fun startCapture(resultCode: Int, resultData: Intent) {
@@ -303,17 +310,18 @@ class AmbientCaptureService : Service() {
             @Suppress("DEPRECATION")
             windowManager.defaultDisplay.getRealMetrics(metrics)
 
-            // Scaled buffer for ultra-low latency edge color extraction (320x180)
-            val captureWidth = 320
-            val captureHeight = 180
+            captureWidth = config.calibration.captureWidth
+            captureHeight = config.calibration.captureHeight
             val densityDpi = metrics.densityDpi
 
-            imageReader = ImageReader.newInstance(
+            val reader = ImageReader.newInstance(
                 captureWidth,
                 captureHeight,
                 PixelFormat.RGBA_8888,
                 2
             )
+            imageReader = reader
+            setupImageAvailableListener(reader)
 
             colorProcessor.reset()
 
@@ -323,82 +331,117 @@ class AmbientCaptureService : Service() {
                 captureHeight,
                 densityDpi,
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                imageReader?.surface,
+                reader.surface,
                 null,
                 backgroundHandler
             )
 
-            imageReader?.setOnImageAvailableListener({ reader ->
-                val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
-
-                if (!isCapturing.get()) {
-                    image.close()
-                    return@setOnImageAvailableListener
-                }
-
-                if (isScreenOff.get() || powerManager?.isInteractive == false) {
-                    if (!isScreenOff.get()) {
-                        handleScreenOff()
-                    }
-                    image.close()
-                    return@setOnImageAvailableListener
-                }
-
-                if (isTestingOverride) {
-                    image.close()
-                    return@setOnImageAvailableListener
-                }
-
-                val targetInterval = 1000L / config.calibration.fps.coerceIn(15, 60)
-                val now = System.currentTimeMillis()
-                if (now - lastFrameTime < targetInterval) {
-                    image.close()
-                    return@setOnImageAvailableListener
-                }
-                lastFrameTime = now
-
-                try {
-                    val devices = config.enabledDevices
-                    for (device in devices) {
-                        val leds = device.totalLeds
-                        if (leds <= 0) continue
-
-                        val requiredSize = leds * 3
-                        var buf = deviceBuffers[device.id]
-                        if (buf == null || buf.size != requiredSize) {
-                            buf = ByteArray(requiredSize)
-                            deviceBuffers[device.id] = buf
-                        }
-
-                        if (colorProcessor.processDevice(image, device, device.calibration, buf)) {
-                            udpSender.sendDrgbFrame(
-                                ip = device.ip,
-                                port = device.port,
-                                timeoutSeconds = 5,
-                                rgb = buf,
-                                ledCount = leds,
-                                colorOrder = device.calibration.colorOrder
-                            )
-
-                            liveFrameListener?.onDeviceFrameProcessed(device.id, buf, leds)
-                        }
-                    }
-                    lastSendTime = now
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error processing frame", e)
-                } finally {
-                    image.close()
-                }
-            }, backgroundHandler)
-
             // Start heartbeat keepalive to maintain ambient lighting on static/paused screens
             backgroundHandler?.postDelayed(keepaliveRunnable, 500L)
 
-            Log.i(TAG, "Ambient multi-device capture started (${config.enabledDevices.size} devices @ ${config.calibration.fps} FPS)")
+            Log.i(TAG, "Ambient multi-device capture started (${config.enabledDevices.size} devices @ ${config.calibration.fps} FPS, ${captureWidth}x${captureHeight})")
         } catch (e: Exception) {
             Log.e(TAG, "Exception in initCapture", e)
             stopCapture()
             stopSelf()
+        }
+    }
+
+    private fun setupImageAvailableListener(reader: ImageReader) {
+        reader.setOnImageAvailableListener({ r ->
+            val image = r.acquireLatestImage() ?: return@setOnImageAvailableListener
+
+            if (!isCapturing.get()) {
+                image.close()
+                return@setOnImageAvailableListener
+            }
+
+            if (isScreenOff.get() || powerManager?.isInteractive == false) {
+                if (!isScreenOff.get()) {
+                    handleScreenOff()
+                }
+                image.close()
+                return@setOnImageAvailableListener
+            }
+
+            if (isTestingOverride) {
+                image.close()
+                return@setOnImageAvailableListener
+            }
+
+            val targetInterval = 1000L / config.calibration.fps.coerceIn(15, 60)
+            val now = System.currentTimeMillis()
+            if (now - lastFrameTime < targetInterval) {
+                image.close()
+                return@setOnImageAvailableListener
+            }
+            lastFrameTime = now
+
+            try {
+                val devices = config.enabledDevices
+                for (device in devices) {
+                    val leds = device.totalLeds
+                    if (leds <= 0) continue
+
+                    val requiredSize = leds * 3
+                    var buf = deviceBuffers[device.id]
+                    if (buf == null || buf.size != requiredSize) {
+                        buf = ByteArray(requiredSize)
+                        deviceBuffers[device.id] = buf
+                    }
+
+                    if (colorProcessor.processDevice(image, device, device.calibration, buf)) {
+                        udpSender.sendDrgbFrame(
+                            ip = device.ip,
+                            port = device.port,
+                            timeoutSeconds = 5,
+                            rgb = buf,
+                            ledCount = leds,
+                            colorOrder = device.calibration.colorOrder
+                        )
+
+                        liveFrameListener?.onDeviceFrameProcessed(device.id, buf, leds)
+                    }
+                }
+                lastSendTime = now
+            } catch (e: Exception) {
+                Log.e(TAG, "Error processing frame", e)
+            } finally {
+                image.close()
+            }
+        }, backgroundHandler)
+    }
+
+    private fun reinitCaptureResolution(newWidth: Int, newHeight: Int) {
+        backgroundHandler?.post {
+            if (!isCapturing.get() || mediaProjection == null) return@post
+            try {
+                captureWidth = newWidth
+                captureHeight = newHeight
+                val oldReader = imageReader
+
+                val windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+                val metrics = DisplayMetrics()
+                @Suppress("DEPRECATION")
+                windowManager.defaultDisplay.getRealMetrics(metrics)
+
+                val newReader = ImageReader.newInstance(
+                    newWidth,
+                    newHeight,
+                    PixelFormat.RGBA_8888,
+                    2
+                )
+                setupImageAvailableListener(newReader)
+                imageReader = newReader
+
+                virtualDisplay?.resize(newWidth, newHeight, metrics.densityDpi)
+                virtualDisplay?.setSurface(newReader.surface)
+
+                oldReader?.close()
+                Log.i(TAG, "Capture resolution updated to ${newWidth}x${newHeight}")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to reinit capture resolution", e)
+            }
         }
     }
 

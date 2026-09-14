@@ -34,12 +34,16 @@ class SystemSettingsActivity : AppCompatActivity() {
     private lateinit var itemFpsSetting: LinearLayout
     private lateinit var tvSystemFpsValue: TextView
 
+    private lateinit var itemResolutionSetting: LinearLayout
+    private lateinit var tvSystemResolutionValue: TextView
+
     private lateinit var itemAutoStartSetting: LinearLayout
     private lateinit var tvSystemAutoStartValue: TextView
 
     private lateinit var itemCheckUpdateSetting: LinearLayout
     private lateinit var tvAppVersionSummary: TextView
     private lateinit var tvUpdateActionText: TextView
+    private var isCheckingUpdate = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -59,6 +63,9 @@ class SystemSettingsActivity : AppCompatActivity() {
 
         itemFpsSetting = findViewById(R.id.itemFpsSetting)
         tvSystemFpsValue = findViewById(R.id.tvSystemFpsValue)
+
+        itemResolutionSetting = findViewById(R.id.itemResolutionSetting)
+        tvSystemResolutionValue = findViewById(R.id.tvSystemResolutionValue)
 
         itemAutoStartSetting = findViewById(R.id.itemAutoStartSetting)
         tvSystemAutoStartValue = findViewById(R.id.tvSystemAutoStartValue)
@@ -87,6 +94,14 @@ class SystemSettingsActivity : AppCompatActivity() {
             } else false
         }
 
+        itemResolutionSetting.setOnClickListener { cycleResolution() }
+        itemResolutionSetting.setOnKeyListener { _, keyCode, event ->
+            if (event.action == KeyEvent.ACTION_DOWN && (keyCode == KeyEvent.KEYCODE_DPAD_LEFT || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT)) {
+                cycleResolution()
+                true
+            } else false
+        }
+
         itemAutoStartSetting.setOnClickListener { toggleAutoStart() }
         itemAutoStartSetting.setOnKeyListener { _, keyCode, event ->
             if (event.action == KeyEvent.ACTION_DOWN && (keyCode == KeyEvent.KEYCODE_DPAD_LEFT || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT)) {
@@ -108,6 +123,21 @@ class SystemSettingsActivity : AppCompatActivity() {
         saveAndUpdate()
     }
 
+    private fun cycleResolution() {
+        val (nextWidth, nextHeight) = when (config.calibration.captureWidth) {
+            160 -> Pair(320, 180)
+            320 -> Pair(480, 270)
+            else -> Pair(160, 90)
+        }
+        config = config.copy(
+            calibration = config.calibration.copy(
+                captureWidth = nextWidth,
+                captureHeight = nextHeight
+            )
+        )
+        saveAndUpdate()
+    }
+
     private fun toggleAutoStart() {
         config = config.copy(autoStartOnBoot = !config.autoStartOnBoot)
         saveAndUpdate()
@@ -123,6 +153,7 @@ class SystemSettingsActivity : AppCompatActivity() {
 
     private fun updateUiValues() {
         tvSystemFpsValue.text = "${config.calibration.fps} FPS"
+        tvSystemResolutionValue.text = config.calibration.resolutionLabel
         tvAppVersionSummary.text = "Current Version: v${BuildConfig.VERSION_NAME}"
 
         if (config.autoStartOnBoot) {
@@ -136,12 +167,13 @@ class SystemSettingsActivity : AppCompatActivity() {
 
 
     private fun performUpdateCheck() {
+        if (isCheckingUpdate) return
+        isCheckingUpdate = true
         tvUpdateActionText.text = "Checking..."
-        itemCheckUpdateSetting.isEnabled = false
 
         lifecycleScope.launch {
             val updateInfo = updateManager.checkForUpdates()
-            itemCheckUpdateSetting.isEnabled = true
+            isCheckingUpdate = false
 
             if (updateInfo.hasUpdate) {
                 tvUpdateActionText.text = "v${updateInfo.latestVersion} Available!"
@@ -153,6 +185,7 @@ class SystemSettingsActivity : AppCompatActivity() {
                     "You are on the latest version (v${BuildConfig.VERSION_NAME})",
                     Toast.LENGTH_SHORT
                 ).show()
+                itemCheckUpdateSetting.requestFocus()
             }
         }
     }
@@ -173,6 +206,9 @@ class SystemSettingsActivity : AppCompatActivity() {
                 startDownloadAndInstall(updateInfo.downloadUrl)
             }
             .setNegativeButton("Later", null)
+            .setOnDismissListener {
+                itemCheckUpdateSetting.requestFocus()
+            }
             .show()
     }
 

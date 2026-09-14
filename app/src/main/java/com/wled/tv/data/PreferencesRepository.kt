@@ -35,7 +35,9 @@ class PreferencesRepository(context: Context) {
             gammaB = prefs.getFloat(KEY_GAMMA_B, 1.0f),
             colorOrder = prefs.getString(KEY_COLOR_ORDER, "RGB") ?: "RGB",
             smoothingFactor = prefs.getFloat(KEY_SMOOTHING, 0.40f),
-            fps = prefs.getInt(KEY_FPS, 60)
+            fps = prefs.getInt(KEY_FPS, 60),
+            captureWidth = prefs.getInt(KEY_CAPTURE_WIDTH, 320),
+            captureHeight = prefs.getInt(KEY_CAPTURE_HEIGHT, 180)
         )
 
         val devicesJson = prefs.getString(KEY_DEVICES_JSON, null)
@@ -72,6 +74,7 @@ class PreferencesRepository(context: Context) {
             bottomCrop = prefs.getFloat(KEY_BOTTOM_CROP, 0.0f),
             leftCrop = prefs.getFloat(KEY_LEFT_CROP, 0.0f),
             rightCrop = prefs.getFloat(KEY_RIGHT_CROP, 0.0f),
+            depth = prefs.getFloat(KEY_DEPTH, 0.12f),
             autoLetterbox = prefs.getBoolean(KEY_AUTO_LETTERBOX, true)
         )
 
@@ -115,6 +118,7 @@ class PreferencesRepository(context: Context) {
                     bottomCrop = obj.optDouble("bottomCrop", 0.0).toFloat(),
                     leftCrop = obj.optDouble("leftCrop", 0.0).toFloat(),
                     rightCrop = obj.optDouble("rightCrop", 0.0).toFloat(),
+                    depth = obj.optDouble("depth", 0.12).toFloat(),
                     autoLetterbox = obj.optBoolean("autoLetterbox", true)
                 )
 
@@ -140,7 +144,9 @@ class PreferencesRepository(context: Context) {
                         gammaB = obj.optDouble("cal_gamb", fallbackCalibration.gammaB.toDouble()).toFloat(),
                         colorOrder = colorOrder,
                         smoothingFactor = obj.optDouble("cal_sm", fallbackCalibration.smoothingFactor.toDouble()).toFloat(),
-                        fps = fallbackCalibration.fps
+                        fps = fallbackCalibration.fps,
+                        captureWidth = fallbackCalibration.captureWidth,
+                        captureHeight = fallbackCalibration.captureHeight
                     )
                 } else {
                     fallbackCalibration.copy(colorOrder = colorOrder)
@@ -192,6 +198,7 @@ class PreferencesRepository(context: Context) {
                 put("bottomCrop", dev.perimeter.bottomCrop)
                 put("leftCrop", dev.perimeter.leftCrop)
                 put("rightCrop", dev.perimeter.rightCrop)
+                put("depth", dev.perimeter.depth)
                 put("autoLetterbox", dev.perimeter.autoLetterbox)
 
                 put("rectL", dev.customRect.left)
@@ -233,6 +240,7 @@ class PreferencesRepository(context: Context) {
             putFloat(KEY_BOTTOM_CROP, primary.perimeter.bottomCrop)
             putFloat(KEY_LEFT_CROP, primary.perimeter.leftCrop)
             putFloat(KEY_RIGHT_CROP, primary.perimeter.rightCrop)
+            putFloat(KEY_DEPTH, primary.perimeter.depth)
             putBoolean(KEY_AUTO_LETTERBOX, primary.perimeter.autoLetterbox)
 
             putFloat(KEY_SATURATION, primary.calibration.saturation)
@@ -248,6 +256,8 @@ class PreferencesRepository(context: Context) {
             putString(KEY_COLOR_ORDER, primary.calibration.colorOrder)
             putFloat(KEY_SMOOTHING, primary.calibration.smoothingFactor)
             putInt(KEY_FPS, config.calibration.fps)
+            putInt(KEY_CAPTURE_WIDTH, config.calibration.captureWidth)
+            putInt(KEY_CAPTURE_HEIGHT, config.calibration.captureHeight)
             apply()
         }
     }
@@ -269,6 +279,7 @@ class PreferencesRepository(context: Context) {
         private const val KEY_BOTTOM_CROP = "bottom_crop"
         private const val KEY_LEFT_CROP = "left_crop"
         private const val KEY_RIGHT_CROP = "right_crop"
+        private const val KEY_DEPTH = "perimeter_depth"
         private const val KEY_AUTO_LETTERBOX = "auto_letterbox"
 
         private const val KEY_SATURATION = "saturation"
@@ -284,5 +295,7 @@ class PreferencesRepository(context: Context) {
         private const val KEY_COLOR_ORDER = "color_order"
         private const val KEY_SMOOTHING = "smoothing"
         private const val KEY_FPS = "capture_fps"
+        private const val KEY_CAPTURE_WIDTH = "capture_width"
+        private const val KEY_CAPTURE_HEIGHT = "capture_height"
     }
 }

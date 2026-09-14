@@ -41,6 +41,7 @@ data class PerimeterConfig(
     val bottomCrop: Float = 0.0f,
     val leftCrop: Float = 0.0f,
     val rightCrop: Float = 0.0f,
+    val depth: Float = 0.12f,
     val autoLetterbox: Boolean = true
 ) {
     val totalLeds: Int
@@ -60,6 +61,8 @@ data class PerimeterConfig(
         return AspectRatioPreset.CUSTOM
     }
 
+    fun getEffectiveDepth(): Float = depth.coerceIn(0.03f, 0.30f)
+
     /**
      * Generates a normalized RectF [0..1] sampling bounding box for each LED around the perimeter.
      * When letterbox cropping is active (e.g. 2.39:1 movie bars), left and right edges are
@@ -74,8 +77,9 @@ data class PerimeterConfig(
         val activeH = (yBottom - yTop).coerceAtLeast(0.1f)
         val activeW = (xRight - xLeft).coerceAtLeast(0.1f)
 
-        val depthY = 0.12f * activeH
-        val depthX = 0.12f * activeW
+        val effectiveDepth = getEffectiveDepth()
+        val depthY = effectiveDepth * activeH
+        val depthX = effectiveDepth * activeW
 
         // 1. Compute physical edge arrays (each ordered clockwise)
         val topZones = ArrayList<RectF>(topLeds)

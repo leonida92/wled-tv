@@ -13,5 +13,14 @@ data class ColorCalibration(
     val gammaB: Float = 1.0f,            // Blue gamma curve (0.5 to 2.5)
     val colorOrder: String = "RGB",      // Byte layout: RGB, GRB, BRG, BGR, RBG, GBR
     val smoothingFactor: Float = 0.40f,  // EMA smoothing factor (0.1 = heavy smooth, 1.0 = instant)
-    val fps: Int = 60                    // Target capture frame rate (15, 30, 60)
-)
+    val fps: Int = 60,                   // Target capture frame rate (15, 30, 60)
+    val captureWidth: Int = 320,         // Capture buffer width (160, 320, 480)
+    val captureHeight: Int = 180         // Capture buffer height (90, 180, 270)
+) {
+    val resolutionLabel: String
+        get() = when (captureWidth) {
+            160 -> "160x90 (Eco)"
+            480 -> "480x270 (High)"
+            else -> "320x180 (Std)"
+        }
+}

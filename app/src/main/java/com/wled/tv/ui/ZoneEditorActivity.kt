@@ -27,6 +27,7 @@ class ZoneEditorActivity : AppCompatActivity() {
     private lateinit var btnTargetBottom: Button
     private lateinit var btnTargetLeft: Button
     private lateinit var btnTargetRight: Button
+    private lateinit var btnTargetDepth: Button
     private lateinit var btnAutoDetect: Button
     private lateinit var btnResetZones: Button
     private lateinit var btnDone: Button
@@ -53,6 +54,7 @@ class ZoneEditorActivity : AppCompatActivity() {
         btnTargetBottom = findViewById(R.id.btnTargetBottom)
         btnTargetLeft = findViewById(R.id.btnTargetLeft)
         btnTargetRight = findViewById(R.id.btnTargetRight)
+        btnTargetDepth = findViewById(R.id.btnTargetDepth)
         btnAutoDetect = findViewById(R.id.btnAutoDetect)
         btnResetZones = findViewById(R.id.btnResetZones)
         btnDone = findViewById(R.id.btnDone)
@@ -74,11 +76,17 @@ class ZoneEditorActivity : AppCompatActivity() {
         btnTargetRight.setOnFocusChangeListener { _, hasFocus ->
             if (hasFocus) selectBorder(ActiveBorder.RIGHT)
         }
+        btnTargetDepth.setOnFocusChangeListener { _, hasFocus ->
+            if (hasFocus) {
+                selectBorder(ActiveBorder.NONE)
+            }
+        }
 
         btnTargetTop.setOnClickListener { adjustActiveBorder(0.01f) }
         btnTargetBottom.setOnClickListener { adjustActiveBorder(0.01f) }
         btnTargetLeft.setOnClickListener { adjustActiveBorder(0.01f) }
         btnTargetRight.setOnClickListener { adjustActiveBorder(0.01f) }
+        btnTargetDepth.setOnClickListener { adjustDepth(0.01f) }
 
         val borderKeyListener = View.OnKeyListener { _, keyCode, event ->
             if (event.action == KeyEvent.ACTION_DOWN) {
@@ -100,6 +108,22 @@ class ZoneEditorActivity : AppCompatActivity() {
         btnTargetBottom.setOnKeyListener(borderKeyListener)
         btnTargetLeft.setOnKeyListener(borderKeyListener)
         btnTargetRight.setOnKeyListener(borderKeyListener)
+
+        btnTargetDepth.setOnKeyListener { _, keyCode, event ->
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                when (keyCode) {
+                    KeyEvent.KEYCODE_DPAD_UP -> {
+                        adjustDepth(0.01f)
+                        true
+                    }
+                    KeyEvent.KEYCODE_DPAD_DOWN -> {
+                        adjustDepth(-0.01f)
+                        true
+                    }
+                    else -> false
+                }
+            } else false
+        }
 
         btnAutoDetect.setOnClickListener {
             toggleAutoDetect()
@@ -190,6 +214,16 @@ class ZoneEditorActivity : AppCompatActivity() {
         saveAndUpdate()
     }
 
+    private fun adjustDepth(delta: Float) {
+        val current = config.perimeter.depth
+        val newDepth = (current + delta).coerceIn(0.03f, 0.30f)
+        val updatedDevices = config.devices.map { dev ->
+            dev.copy(perimeter = dev.perimeter.copy(depth = newDepth))
+        }
+        config = config.copy(devices = updatedDevices)
+        saveAndUpdate()
+    }
+
     private fun saveAndUpdate() {
         prefsRepo.saveConfig(config)
         updateUi()
@@ -205,6 +239,7 @@ class ZoneEditorActivity : AppCompatActivity() {
         btnTargetBottom.text = String.format(Locale.US, "▲ Bot: %.0f%% ▼", p.bottomCrop * 100)
         btnTargetLeft.text = String.format(Locale.US, "▲ Left: %.0f%% ▼", p.leftCrop * 100)
         btnTargetRight.text = String.format(Locale.US, "▲ Right: %.0f%% ▼", p.rightCrop * 100)
+        btnTargetDepth.text = String.format(Locale.US, "▲ Depth: %.0f%% ▼", p.depth * 100)
 
         if (p.autoLetterbox) {
             btnAutoDetect.text = "Auto-Detect: ON"
@@ -222,6 +257,10 @@ class ZoneEditorActivity : AppCompatActivity() {
 
     private fun updateStatusText() {
         val p = config.perimeter
+        if (btnTargetDepth.hasFocus()) {
+            tvInstruction.text = "Active: Sampling Depth ${(p.depth * 100).toInt()}% | D-pad Up/Down: adjust zone depth (3% - 30%)"
+            return
+        }
         if (p.autoLetterbox) {
             tvInstruction.text = "Dynamic Auto-Detection ACTIVE: Letterbox bars are scanned in real-time."
             return
