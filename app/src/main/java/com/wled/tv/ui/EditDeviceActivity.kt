@@ -134,6 +134,7 @@ class EditDeviceActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         testJob?.cancel()
+        udpSender.close()
         if (isNewDevice && !isSaved) {
             // Clean up any temporary draft saved for sub-activities
             val latest = prefsRepo.loadConfig()

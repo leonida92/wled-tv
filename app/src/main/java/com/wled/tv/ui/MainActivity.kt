@@ -149,7 +149,10 @@ class MainActivity : AppCompatActivity(),
         }
     }
 
-    private fun renderDeviceDock() {
+    private fun renderDeviceDock(focusIndex: Int? = null) {
+        val focusedChild = layoutDeviceDock.focusedChild
+        val focusedIndex = focusIndex ?: if (focusedChild != null) layoutDeviceDock.indexOfChild(focusedChild) else -1
+
         layoutDeviceDock.removeAllViews()
         val inflater = LayoutInflater.from(this)
 
@@ -217,6 +220,12 @@ class MainActivity : AppCompatActivity(),
             showAddDevicePicker()
         }
         layoutDeviceDock.addView(addBtn)
+
+        if (focusedIndex in 0 until layoutDeviceDock.childCount) {
+            layoutDeviceDock.post {
+                layoutDeviceDock.getChildAt(focusedIndex)?.requestFocus()
+            }
+        }
     }
 
     private fun updateDeviceDockDot(deviceId: String, enabled: Boolean, reachable: Boolean?) {
@@ -240,7 +249,24 @@ class MainActivity : AppCompatActivity(),
         config = config.copy(devices = updatedList)
         prefsRepo.saveConfig(config)
 
-        renderDeviceDock()
+        val card = layoutDeviceDock.getChildAt(position)
+        if (card != null) {
+            card.setOnClickListener {
+                toggleDeviceEnabled(updatedDevice, position)
+            }
+            card.setOnLongClickListener {
+                val intent = Intent(this, EditDeviceActivity::class.java).apply {
+                    putExtra(EditDeviceActivity.EXTRA_DEVICE_ID, updatedDevice.id)
+                }
+                startActivity(intent)
+                true
+            }
+            updateDeviceDockDot(updatedDevice.id, newEnabled, if (newEnabled) deviceReachabilityMap[updatedDevice.id] else null)
+            card.requestFocus()
+        } else {
+            renderDeviceDock(position)
+        }
+
         tvPreviewView.updateDevices(config.devices)
         updateUiState()
 
@@ -494,6 +520,11 @@ class MainActivity : AppCompatActivity(),
             }
             updateUiState()
         }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        udpSender.close()
     }
 
     companion object {

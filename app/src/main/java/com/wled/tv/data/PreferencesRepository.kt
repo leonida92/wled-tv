@@ -300,7 +300,7 @@ class PreferencesRepository(context: Context) {
                             entityId = lObj.optString("entityId"),
                             name = lObj.optString("name"),
                             capability = capability,
-                            enabled = lObj.optBoolean("enabled", true),
+                            enabled = lObj.optBoolean("enabled", false),
                             zoneType = zoneType,
                             customRect = rect,
                             maxBrightness = lObj.optInt("maxBrightness", 255)

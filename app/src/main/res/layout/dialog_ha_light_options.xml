@@ -54,9 +54,9 @@
         android:layout_height="130dp"
         android:layout_marginTop="12dp" />
 
-    <!-- Option 1: Sync Toggle -->
+    <!-- Option 1: Sampling Zone -->
     <LinearLayout
-        android:id="@+id/btnDialogToggleLightSync"
+        android:id="@+id/btnDialogSelectZone"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="12dp"
@@ -64,58 +64,6 @@
         android:clickable="true"
         android:focusable="true"
         android:gravity="center_vertical"
-        android:nextFocusDown="@+id/btnDialogSelectZone"
-        android:orientation="horizontal"
-        android:padding="10dp">
-
-        <LinearLayout
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:orientation="vertical">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Sync Enabled"
-                android:textColor="@color/text_primary"
-                android:textSize="14sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Include this light in ambient screen synchronization"
-                android:textColor="@color/text_muted"
-                android:textSize="11sp" />
-        </LinearLayout>
-
-        <TextView
-            android:id="@+id/tvDialogLightSyncStatus"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:background="@drawable/bg_pill_button"
-            android:paddingStart="12dp"
-            android:paddingTop="4dp"
-            android:paddingEnd="12dp"
-            android:paddingBottom="4dp"
-            android:text="Enabled"
-            android:textColor="@color/accent_green"
-            android:textSize="12sp"
-            android:textStyle="bold" />
-    </LinearLayout>
-
-    <!-- Option 2: Sampling Zone -->
-    <LinearLayout
-        android:id="@+id/btnDialogSelectZone"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
-        android:background="@drawable/bg_card_selector"
-        android:clickable="true"
-        android:focusable="true"
-        android:gravity="center_vertical"
-        android:nextFocusUp="@+id/btnDialogToggleLightSync"
         android:nextFocusDown="@+id/btnDialogSelectBri"
         android:orientation="horizontal"
         android:padding="10dp">
@@ -225,7 +173,7 @@
             android:nextFocusUp="@+id/btnDialogSelectBri"
             android:paddingStart="24dp"
             android:paddingEnd="24dp"
-            android:text="Done"
+            android:text="Close"
             android:textColor="@color/accent_cyan"
             android:textSize="13sp"
             android:textStyle="bold" />

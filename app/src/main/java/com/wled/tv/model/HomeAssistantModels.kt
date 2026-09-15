@@ -53,7 +53,7 @@ data class HomeAssistantLight(
     val entityId: String,
     val name: String,
     val capability: LightCapability = LightCapability.COLOR_AND_BRIGHTNESS,
-    val enabled: Boolean = true,
+    val enabled: Boolean = false,
     val zoneType: HomeAssistantZoneType = HomeAssistantZoneType.FULL_SCREEN_AVERAGE,
     val customRect: RectF = RectF(0f, 0f, 1f, 1f),
     val maxBrightness: Int = 255

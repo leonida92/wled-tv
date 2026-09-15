@@ -5,6 +5,7 @@ import android.graphics.Color
 import android.graphics.RectF
 import android.os.Bundle
 import android.view.LayoutInflater
+import android.view.View
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ImageView
@@ -321,9 +322,9 @@ class HomeAssistantSettingsActivity : AppCompatActivity() {
             try {
                 val fetched = if (haConfig.cleanHost.equals("demo", ignoreCase = true)) {
                     listOf(
-                        HomeAssistantLight("light.living_room_tv_rgb", "Living Room TV Strip", LightCapability.COLOR_AND_BRIGHTNESS, enabled = true, zoneType = HomeAssistantZoneType.FULL_SCREEN_AVERAGE),
-                        HomeAssistantLight("light.floor_lamp", "Floor Lamp Dimmer", LightCapability.BRIGHTNESS_ONLY, enabled = true, zoneType = HomeAssistantZoneType.LEFT_AMBIENT),
-                        HomeAssistantLight("light.ceiling_accent", "Ceiling Accent RGB", LightCapability.COLOR_AND_BRIGHTNESS, enabled = true, zoneType = HomeAssistantZoneType.TOP_AMBIENT),
+                        HomeAssistantLight("light.living_room_tv_rgb", "Living Room TV Strip", LightCapability.COLOR_AND_BRIGHTNESS, enabled = false, zoneType = HomeAssistantZoneType.FULL_SCREEN_AVERAGE),
+                        HomeAssistantLight("light.floor_lamp", "Floor Lamp Dimmer", LightCapability.BRIGHTNESS_ONLY, enabled = false, zoneType = HomeAssistantZoneType.LEFT_AMBIENT),
+                        HomeAssistantLight("light.ceiling_accent", "Ceiling Accent RGB", LightCapability.COLOR_AND_BRIGHTNESS, enabled = false, zoneType = HomeAssistantZoneType.TOP_AMBIENT),
                         HomeAssistantLight("light.reading_light", "Reading Spot Light", LightCapability.BRIGHTNESS_ONLY, enabled = false, zoneType = HomeAssistantZoneType.CUSTOM_RECT, customRect = RectF(0.2f, 0.2f, 0.8f, 0.8f))
                     )
                 } else {
@@ -341,7 +342,7 @@ class HomeAssistantSettingsActivity : AppCompatActivity() {
                             maxBrightness = existing.maxBrightness
                         )
                     } else {
-                        newLight
+                        newLight.copy(enabled = false)
                     }
                 }
 
@@ -357,9 +358,7 @@ class HomeAssistantSettingsActivity : AppCompatActivity() {
         }
     }
 
-    private fun renderLightsList() {
-        layoutHaLightsContainer.removeAllViews()
-
+    private fun updateLightsCountHeader() {
         val activeCount = lightsList.count { it.enabled && it.capability != LightCapability.UNSUPPORTED }
         val visibleIndices = lightsList.indices.filter { idx ->
             if (hideDisabledLights) {
@@ -375,6 +374,20 @@ class HomeAssistantSettingsActivity : AppCompatActivity() {
         } else {
             "$activeCount active of ${lightsList.size}"
         }
+    }
+
+    private fun renderLightsList(focusActualIndex: Int? = null, focusViewId: Int? = null) {
+        layoutHaLightsContainer.removeAllViews()
+
+        val visibleIndices = lightsList.indices.filter { idx ->
+            if (hideDisabledLights) {
+                lightsList[idx].enabled && lightsList[idx].capability != LightCapability.UNSUPPORTED
+            } else {
+                true
+            }
+        }
+
+        updateLightsCountHeader()
 
         if (visibleIndices.isEmpty()) {
             if (lightsList.isEmpty()) {
@@ -395,7 +408,11 @@ class HomeAssistantSettingsActivity : AppCompatActivity() {
             val tvName = itemView.findViewById<TextView>(R.id.tvLightName)
             val tvBadge = itemView.findViewById<TextView>(R.id.tvCapabilityBadge)
             val tvEntity = itemView.findViewById<TextView>(R.id.tvEntityId)
+            val layoutLightInfo = itemView.findViewById<View>(R.id.layoutLightInfo)
+            val btnConfigure = itemView.findViewById<View>(R.id.btnConfigureLight)
             val tvPill = itemView.findViewById<TextView>(R.id.tvLightStatusPill)
+            val btnToggle = itemView.findViewById<View>(R.id.btnToggleLight)
+            val tvToggle = itemView.findViewById<TextView>(R.id.tvToggleLight)
 
             tvName.text = light.name
             tvEntity.text = light.entityId
@@ -416,24 +433,72 @@ class HomeAssistantSettingsActivity : AppCompatActivity() {
                 }
             }
 
-            // Status Pill & Icon Tint
-            if (light.enabled && light.capability != LightCapability.UNSUPPORTED) {
-                val briPct = (light.maxBrightness * 100) / 255
-                tvPill.text = "${light.zoneType.displayName} • $briPct%"
-                tvPill.setTextColor(Color.parseColor("#00E5FF"))
-                ivIcon.setColorFilter(Color.parseColor("#00E5FF"))
-            } else {
-                tvPill.text = "Disabled"
-                tvPill.setTextColor(Color.parseColor("#94A3B8"))
-                ivIcon.setColorFilter(Color.parseColor("#64748B"))
+            fun updateCardUi(l: HomeAssistantLight) {
+                val briPct = (l.maxBrightness * 100) / 255
+                tvPill.text = "${l.zoneType.displayName} • $briPct%"
+
+                if (l.capability == LightCapability.UNSUPPORTED) {
+                    tvPill.text = "Unsupported"
+                    tvPill.setTextColor(Color.parseColor("#64748B"))
+                    tvToggle.text = "--"
+                    tvToggle.setTextColor(Color.parseColor("#64748B"))
+                    btnToggle.isEnabled = false
+                    btnConfigure.isEnabled = false
+                    ivIcon.setColorFilter(Color.parseColor("#64748B"))
+                } else if (l.enabled) {
+                    tvPill.setTextColor(Color.parseColor("#00E5FF"))
+                    tvToggle.text = "ON"
+                    tvToggle.setTextColor(Color.parseColor("#00E676"))
+                    btnToggle.isEnabled = true
+                    btnConfigure.isEnabled = true
+                    ivIcon.setColorFilter(Color.parseColor("#00E5FF"))
+                } else {
+                    tvPill.setTextColor(Color.parseColor("#94A3B8"))
+                    tvToggle.text = "OFF"
+                    tvToggle.setTextColor(Color.parseColor("#94A3B8"))
+                    btnToggle.isEnabled = true
+                    btnConfigure.isEnabled = true
+                    ivIcon.setColorFilter(Color.parseColor("#64748B"))
+                }
             }
 
-            // Clicking opens the clean Light Options Dialog with live Interactive Screen Preview
-            itemView.setOnClickListener {
+            updateCardUi(light)
+
+            // Open dialog from card body or configure pill
+            layoutLightInfo.setOnClickListener {
+                showLightOptionsDialog(actualIndex)
+            }
+            btnConfigure.setOnClickListener {
                 showLightOptionsDialog(actualIndex)
             }
 
+            // Direct toggle from card
+            btnToggle.setOnClickListener {
+                val current = lightsList[actualIndex]
+                if (current.capability == LightCapability.UNSUPPORTED) return@setOnClickListener
+                val newEnabled = !current.enabled
+                val updated = current.copy(enabled = newEnabled)
+                lightsList[actualIndex] = updated
+                saveConfig()
+
+                if (hideDisabledLights && !newEnabled) {
+                    renderLightsList()
+                } else {
+                    updateCardUi(updated)
+                    updateLightsCountHeader()
+                }
+            }
+
             layoutHaLightsContainer.addView(itemView)
+        }
+
+        if (focusActualIndex != null) {
+            val targetPos = visibleIndices.indexOf(focusActualIndex)
+            if (targetPos in 0 until layoutHaLightsContainer.childCount) {
+                val child = layoutHaLightsContainer.getChildAt(targetPos)
+                val targetView = if (focusViewId != null) child.findViewById<View>(focusViewId) else child
+                targetView?.post { targetView.requestFocus() }
+            }
         }
     }
 
@@ -446,9 +511,6 @@ class HomeAssistantSettingsActivity : AppCompatActivity() {
         val tvDialogCapabilityBadge = dialogView.findViewById<TextView>(R.id.tvDialogCapabilityBadge)
         val tvDialogEntityId = dialogView.findViewById<TextView>(R.id.tvDialogEntityId)
         val haZonePreview = dialogView.findViewById<HaZonePreviewView>(R.id.haZonePreview)
-
-        val btnDialogToggleSync = dialogView.findViewById<LinearLayout>(R.id.btnDialogToggleLightSync)
-        val tvDialogSyncStatus = dialogView.findViewById<TextView>(R.id.tvDialogLightSyncStatus)
 
         val btnDialogSelectZone = dialogView.findViewById<LinearLayout>(R.id.btnDialogSelectZone)
         val tvDialogZoneValue = dialogView.findViewById<TextView>(R.id.tvDialogLightZoneValue)
@@ -477,13 +539,6 @@ class HomeAssistantSettingsActivity : AppCompatActivity() {
         }
 
         fun refreshDialogFields() {
-            if (currentLight.enabled) {
-                tvDialogSyncStatus.text = "Enabled"
-                tvDialogSyncStatus.setTextColor(Color.parseColor("#00E676"))
-            } else {
-                tvDialogSyncStatus.text = "Disabled"
-                tvDialogSyncStatus.setTextColor(Color.parseColor("#94A3B8"))
-            }
             tvDialogZoneValue.text = currentLight.zoneType.displayName
             val pct = (currentLight.maxBrightness * 100) / 255
             tvDialogBriValue.text = "$pct%"
@@ -491,9 +546,9 @@ class HomeAssistantSettingsActivity : AppCompatActivity() {
         }
         refreshDialogFields()
 
-        btnDialogToggleSync.setOnClickListener {
-            currentLight = currentLight.copy(enabled = !currentLight.enabled)
-            refreshDialogFields()
+        fun persistAndNotify() {
+            lightsList[lightIndex] = currentLight
+            saveConfig()
         }
 
         btnDialogSelectZone.setOnClickListener {
@@ -512,10 +567,12 @@ class HomeAssistantSettingsActivity : AppCompatActivity() {
                                 zoneType = HomeAssistantZoneType.CUSTOM_RECT,
                                 customRect = updatedRect
                             )
+                            persistAndNotify()
                             refreshDialogFields()
                         }
                     } else {
                         currentLight = currentLight.copy(zoneType = selectedZone)
+                        persistAndNotify()
                         refreshDialogFields()
                         zoneDialog.dismiss()
                     }
@@ -532,6 +589,7 @@ class HomeAssistantSettingsActivity : AppCompatActivity() {
                 else -> 255
             }
             currentLight = currentLight.copy(maxBrightness = nextBri)
+            persistAndNotify()
             refreshDialogFields()
         }
 
@@ -539,15 +597,17 @@ class HomeAssistantSettingsActivity : AppCompatActivity() {
             .setView(dialogView)
             .create()
 
+        parentDialog.setOnDismissListener {
+            persistAndNotify()
+            renderLightsList(focusActualIndex = lightIndex, focusViewId = R.id.btnConfigureLight)
+        }
+
         btnDialogLightDone.setOnClickListener {
-            lightsList[lightIndex] = currentLight
-            renderLightsList()
-            saveConfig()
             parentDialog.dismiss()
         }
 
         parentDialog.show()
-        btnDialogToggleSync.requestFocus()
+        btnDialogSelectZone.requestFocus()
     }
 
     private fun showCustomBoxDialog(

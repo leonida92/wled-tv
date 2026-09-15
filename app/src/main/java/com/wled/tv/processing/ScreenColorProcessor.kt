@@ -18,6 +18,7 @@ class ScreenColorProcessor {
 
     private val smoothingFilters = HashMap<String, ColorSmoothingFilter>()
     private var rawRgbBuffer = ByteArray(0)
+    private val haSampleBuffer = ByteArray(3)
 
     // Dynamic Letterbox Auto-Detection state
     private var detectedTopCrop: Float = 0.0f
@@ -26,6 +27,7 @@ class ScreenColorProcessor {
     private var candidateBottomCrop: Float = 0.0f
     private var stableFrameCount: Int = 0
     private var cachedDynamicZones: List<RectF>? = null
+    private var lastPerimeterConfig: PerimeterConfig? = null
     private var lastAppliedTopCrop: Float = -1f
     private var lastAppliedBottomCrop: Float = -1f
 
@@ -37,8 +39,20 @@ class ScreenColorProcessor {
         candidateBottomCrop = 0.0f
         stableFrameCount = 0
         cachedDynamicZones = null
+        lastPerimeterConfig = null
         lastAppliedTopCrop = -1f
         lastAppliedBottomCrop = -1f
+    }
+
+    /**
+     * Runs real-time letterbox scan once per frame across the image buffer.
+     */
+    fun scanLetterbox(image: Image) {
+        val planes = image.planes
+        if (planes.isEmpty()) return
+        val plane = planes[0]
+        val buffer = plane.buffer ?: return
+        detectLetterbox(buffer, image.width, image.height, plane.rowStride, plane.pixelStride)
     }
 
     /**
@@ -87,9 +101,6 @@ class ScreenColorProcessor {
     ): Boolean {
         if (width <= 0 || height <= 0) return false
 
-        // Run real-time letterbox scan on every frame
-        detectLetterbox(buffer, width, height, rowStride, pixelStride)
-
         return if (device.type == DeviceType.PERIMETER || (device.perimeter.totalLeds > 0 && device.perimeter.totalLeds == device.totalLeds)) {
             processPerimeter(buffer, width, height, rowStride, pixelStride, device, calibration, outputRgb)
         } else {
@@ -112,11 +123,25 @@ class ScreenColorProcessor {
         val topCrop = if (perimeter.autoLetterbox || detectedTopCrop > 0.005f) detectedTopCrop else perimeter.topCrop
         val bottomCrop = if (perimeter.autoLetterbox || detectedBottomCrop > 0.005f) detectedBottomCrop else perimeter.bottomCrop
 
-        val dynamicPerimeter = perimeter.copy(
-            topCrop = topCrop,
-            bottomCrop = bottomCrop
-        )
-        val activeZones = dynamicPerimeter.computeLedZones()
+        val activeZones = if (cachedDynamicZones != null &&
+            lastPerimeterConfig == perimeter &&
+            topCrop == lastAppliedTopCrop &&
+            bottomCrop == lastAppliedBottomCrop
+        ) {
+            cachedDynamicZones!!
+        } else {
+            val dynamicPerimeter = perimeter.copy(
+                topCrop = topCrop,
+                bottomCrop = bottomCrop
+            )
+            val computed = dynamicPerimeter.computeLedZones()
+            cachedDynamicZones = computed
+            lastPerimeterConfig = perimeter
+            lastAppliedTopCrop = topCrop
+            lastAppliedBottomCrop = bottomCrop
+            computed
+        }
+
         val ledCount = activeZones.size
         if (ledCount == 0) return false
 
@@ -126,12 +151,17 @@ class ScreenColorProcessor {
         }
 
         for (i in 0 until ledCount) {
-            val zone = activeZones[i]
-            val rgb = sampleChromaWeightedBox(buffer, width, height, rowStride, pixelStride, zone, calibration)
-            val outIdx = i * 3
-            rawRgbBuffer[outIdx] = rgb[0]
-            rawRgbBuffer[outIdx + 1] = rgb[1]
-            rawRgbBuffer[outIdx + 2] = rgb[2]
+            sampleChromaWeightedBox(
+                buffer = buffer,
+                width = width,
+                height = height,
+                rowStride = rowStride,
+                pixelStride = pixelStride,
+                zone = activeZones[i],
+                calibration = calibration,
+                outBuffer = rawRgbBuffer,
+                outOffset = i * 3
+            )
         }
 
         val filter = smoothingFilters.getOrPut(device.id) { ColorSmoothingFilter() }
@@ -173,24 +203,31 @@ class ScreenColorProcessor {
 
         if (ledCount == 1) {
             // Single spot light / bulb
-            val rgb = sampleChromaWeightedBox(buffer, width, height, rowStride, pixelStride, region, calibration)
-            rawRgbBuffer[0] = rgb[0]
-            rawRgbBuffer[1] = rgb[1]
-            rawRgbBuffer[2] = rgb[2]
+            sampleChromaWeightedBox(
+                buffer = buffer,
+                width = width,
+                height = height,
+                rowStride = rowStride,
+                pixelStride = pixelStride,
+                zone = region,
+                calibration = calibration,
+                outBuffer = rawRgbBuffer,
+                outOffset = 0
+            )
         } else {
             // Multi-LED Strip / Lightbar: Spatially slice the region across all LEDs
             for (i in 0 until ledCount) {
                 val subZone = when (device.type) {
                     DeviceType.LEFT_AMBIENT -> {
                         val step = (region.bottom - region.top) / ledCount
-                        val b = region.bottom - (i * step)
-                        val t = b - step
+                        val t = region.top + (i * step)
+                        val b = t + step
                         RectF(region.left, t.coerceAtLeast(region.top), region.right, b.coerceAtMost(region.bottom))
                     }
                     DeviceType.RIGHT_AMBIENT -> {
                         val step = (region.bottom - region.top) / ledCount
-                        val b = region.bottom - (i * step)
-                        val t = b - step
+                        val t = region.top + (i * step)
+                        val b = t + step
                         RectF(region.left, t.coerceAtLeast(region.top), region.right, b.coerceAtMost(region.bottom))
                     }
                     DeviceType.TOP_AMBIENT -> {
@@ -213,11 +250,17 @@ class ScreenColorProcessor {
                     }
                 }
 
-                val rgb = sampleChromaWeightedBox(buffer, width, height, rowStride, pixelStride, subZone, calibration)
-                val outIdx = i * 3
-                rawRgbBuffer[outIdx] = rgb[0]
-                rawRgbBuffer[outIdx + 1] = rgb[1]
-                rawRgbBuffer[outIdx + 2] = rgb[2]
+                sampleChromaWeightedBox(
+                    buffer = buffer,
+                    width = width,
+                    height = height,
+                    rowStride = rowStride,
+                    pixelStride = pixelStride,
+                    zone = subZone,
+                    calibration = calibration,
+                    outBuffer = rawRgbBuffer,
+                    outOffset = i * 3
+                )
             }
         }
 
@@ -260,10 +303,20 @@ class ScreenColorProcessor {
             HomeAssistantZoneType.CUSTOM_RECT -> light.customRect
         }
 
-        val rgbBytes = sampleChromaWeightedBox(buffer, width, height, rowStride, pixelStride, targetRect, calibration)
-        val r = rgbBytes[0].toInt() and 0xFF
-        val g = rgbBytes[1].toInt() and 0xFF
-        val b = rgbBytes[2].toInt() and 0xFF
+        sampleChromaWeightedBox(
+            buffer = buffer,
+            width = width,
+            height = height,
+            rowStride = rowStride,
+            pixelStride = pixelStride,
+            zone = targetRect,
+            calibration = calibration,
+            outBuffer = haSampleBuffer,
+            outOffset = 0
+        )
+        val r = haSampleBuffer[0].toInt() and 0xFF
+        val g = haSampleBuffer[1].toInt() and 0xFF
+        val b = haSampleBuffer[2].toInt() and 0xFF
         val bri = max(r, max(g, b))
         return intArrayOf(r, g, b, bri)
     }
@@ -275,8 +328,10 @@ class ScreenColorProcessor {
         rowStride: Int,
         pixelStride: Int,
         zone: RectF,
-        calibration: ColorCalibration
-    ): ByteArray {
+        calibration: ColorCalibration,
+        outBuffer: ByteArray,
+        outOffset: Int
+    ) {
         val x0 = (zone.left * width).toInt().coerceIn(0, width - 1)
         val x1 = (zone.right * width).toInt().coerceIn(x0 + 1, width)
         val y0 = (zone.top * height).toInt().coerceIn(0, height - 1)
@@ -386,11 +441,9 @@ class ScreenColorProcessor {
             }
         }
 
-        return byteArrayOf(
-            outR.roundToInt().coerceIn(0, 255).toByte(),
-            outG.roundToInt().coerceIn(0, 255).toByte(),
-            outB.roundToInt().coerceIn(0, 255).toByte()
-        )
+        outBuffer[outOffset] = outR.roundToInt().coerceIn(0, 255).toByte()
+        outBuffer[outOffset + 1] = outG.roundToInt().coerceIn(0, 255).toByte()
+        outBuffer[outOffset + 2] = outB.roundToInt().coerceIn(0, 255).toByte()
     }
 
     /**

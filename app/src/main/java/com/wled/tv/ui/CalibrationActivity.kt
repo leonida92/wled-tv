@@ -98,6 +98,7 @@ class CalibrationActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         stopTestColorStream()
+        udpSender.close()
     }
 
     private fun bindViews() {

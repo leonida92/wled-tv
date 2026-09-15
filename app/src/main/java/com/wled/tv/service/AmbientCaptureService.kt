@@ -74,6 +74,7 @@ class AmbientCaptureService : Service() {
     private var isScreenOff = AtomicBoolean(false)
     private var lastFrameTime = 0L
     private var lastSendTime = 0L
+    private var lastHaSampleTime = 0L
     private var captureWidth = 320
     private var captureHeight = 180
 
@@ -269,6 +270,7 @@ class AmbientCaptureService : Service() {
         val oldHeight = captureHeight
         config = prefsRepo.loadConfig()
         colorProcessor.reset()
+        lastHaSampleTime = 0L
         ensureWledAwake()
         initHomeAssistant()
         if (isCapturing.get() && (config.calibration.captureWidth != oldWidth || config.calibration.captureHeight != oldHeight)) {
@@ -427,6 +429,9 @@ class AmbientCaptureService : Service() {
             lastFrameTime = now
 
             try {
+                // Scan letterbox once per frame for all devices
+                colorProcessor.scanLetterbox(image)
+
                 val devices = config.enabledDevices
                 for (device in devices) {
                     val leds = device.totalLeds
@@ -455,15 +460,18 @@ class AmbientCaptureService : Service() {
 
                 val haConfig = config.homeAssistant
                 if (haConfig.enabled && haConfig.enabledLights.isNotEmpty() && haThrottler != null) {
-                    val haColorMap = HashMap<String, IntArray>()
-                    for (light in haConfig.enabledLights) {
-                        val result = colorProcessor.processHaLight(image, light, config.calibration)
-                        if (result != null) {
-                            haColorMap[light.entityId] = result
+                    if (now - lastHaSampleTime >= haConfig.updateIntervalMs) {
+                        lastHaSampleTime = now
+                        val haColorMap = HashMap<String, IntArray>()
+                        for (light in haConfig.enabledLights) {
+                            val result = colorProcessor.processHaLight(image, light, config.calibration)
+                            if (result != null) {
+                                haColorMap[light.entityId] = result
+                            }
                         }
-                    }
-                    if (haColorMap.isNotEmpty()) {
-                        haThrottler?.postLightColors(haColorMap)
+                        if (haColorMap.isNotEmpty()) {
+                            haThrottler?.postLightColors(haColorMap)
+                        }
                     }
                 }
 
@@ -522,6 +530,7 @@ class AmbientCaptureService : Service() {
             ensureWledAwake()
             lastSendTime = 0L
             lastFrameTime = 0L
+            lastHaSampleTime = 0L
             backgroundHandler?.removeCallbacks(keepaliveRunnable)
             backgroundHandler?.post(keepaliveRunnable)
         }
@@ -612,6 +621,7 @@ class AmbientCaptureService : Service() {
         }
 
         blackoutAndPowerOffLeds()
+        lastHaSampleTime = 0L
         haThrottler?.stop()
         haThrottler = null
         haClient.disconnect()

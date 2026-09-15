@@ -16,6 +16,56 @@ class WledDiscovery(context: Context) {
      * Discovers WLED instances on the local network via mDNS (_wled._tcp or _http._tcp).
      */
     fun discoverDevices(): Flow<DiscoveredWled> = callbackFlow {
+        val resolveQueue = ArrayDeque<NsdServiceInfo>()
+        var isResolving = false
+        val resolveLock = Any()
+
+        fun processNextResolve() {
+            val nextService: NsdServiceInfo?
+            synchronized(resolveLock) {
+                if (isResolving || resolveQueue.isEmpty()) return
+                isResolving = true
+                nextService = resolveQueue.removeFirstOrNull()
+            }
+            if (nextService == null) return
+
+            try {
+                nsdManager.resolveService(nextService, object : NsdManager.ResolveListener {
+                    override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
+                        Log.w(TAG, "Resolve failed for ${serviceInfo.serviceName}: $errorCode")
+                        synchronized(resolveLock) {
+                            isResolving = false
+                        }
+                        processNextResolve()
+                    }
+
+                    override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
+                        val host = serviceInfo.host?.hostAddress
+                        val port = serviceInfo.port
+                        if (host != null) {
+                            trySend(
+                                DiscoveredWled(
+                                    name = serviceInfo.serviceName,
+                                    ip = host,
+                                    port = port
+                                )
+                            )
+                        }
+                        synchronized(resolveLock) {
+                            isResolving = false
+                        }
+                        processNextResolve()
+                    }
+                })
+            } catch (e: Exception) {
+                Log.w(TAG, "Exception initiating resolveService", e)
+                synchronized(resolveLock) {
+                    isResolving = false
+                }
+                processNextResolve()
+            }
+        }
+
         val discoveryListener = object : NsdManager.DiscoveryListener {
             override fun onDiscoveryStarted(regType: String) {
                 Log.d(TAG, "mDNS Service discovery started: $regType")
@@ -25,25 +75,10 @@ class WledDiscovery(context: Context) {
                 Log.d(TAG, "Service found: ${service.serviceName}")
                 val name = service.serviceName.lowercase()
                 if (name.contains("wled") || service.serviceType.contains("_wled")) {
-                    nsdManager.resolveService(service, object : NsdManager.ResolveListener {
-                        override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
-                            Log.w(TAG, "Resolve failed for ${serviceInfo.serviceName}: $errorCode")
-                        }
-
-                        override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
-                            val host = serviceInfo.host?.hostAddress
-                            val port = serviceInfo.port
-                            if (host != null) {
-                                trySend(
-                                    DiscoveredWled(
-                                        name = serviceInfo.serviceName,
-                                        ip = host,
-                                        port = port
-                                    )
-                                )
-                            }
-                        }
-                    })
+                    synchronized(resolveLock) {
+                        resolveQueue.addLast(service)
+                    }
+                    processNextResolve()
                 }
             }
 
@@ -77,6 +112,9 @@ class WledDiscovery(context: Context) {
         }
 
         awaitClose {
+            synchronized(resolveLock) {
+                resolveQueue.clear()
+            }
             try {
                 nsdManager.stopServiceDiscovery(discoveryListener)
             } catch (e: Exception) {

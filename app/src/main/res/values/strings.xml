@@ -15,16 +15,10 @@
     <string name="btn_settings">Light Setup &amp; Devices</string>
     <string name="btn_calibration">Color &amp; Calibration</string>
     <string name="btn_system_settings">System &amp; Connection</string>
-    <string name="card_preview_title">Live LED Perimeter Preview</string>
-    <string name="card_wled_info">WLED Controller</string>
-    <string name="card_wled_ip">IP: %1$s</string>
-    <string name="card_wled_leds">Total LEDs: %1$d</string>
 
     <!-- Settings & Layout Screen -->
     <string name="title_settings">Perimeter Strip Geometry</string>
     <string name="title_system_settings">System &amp; Connection</string>
-    <string name="pref_wled_ip">WLED IP Address</string>
-    <string name="pref_wled_ip_desc">LAN IP address of your WLED controller</string>
     <string name="pref_top_leds">Top Edge LEDs</string>
     <string name="pref_right_leds">Right Edge LEDs</string>
     <string name="pref_bottom_leds">Bottom Edge LEDs</string>
@@ -37,8 +31,6 @@
     <string name="pref_resolution_desc">160x90 (Eco) • 320x180 (Standard) • 480x270 (High)</string>
     <string name="pref_auto_start">Auto-start on TV Boot</string>
     <string name="pref_auto_start_desc">Start ambient lighting automatically when TV powers on</string>
-    <string name="btn_scan_lan">Scan LAN for WLED</string>
-    <string name="btn_test_connection">Test Connection</string>
 
     <!-- Calibration Screen -->
     <string name="title_calibration">Color &amp; Performance Calibration</string>
@@ -49,7 +41,6 @@
     <string name="pref_gain_g">Green Gain</string>
     <string name="pref_gain_b">Blue Gain</string>
     <string name="pref_smoothing">Transition Smoothing</string>
-    <string name="pref_chroma_weight">Chroma Weighting</string>
 
     <!-- Notifications -->
     <string name="notification_channel_name">WLED TV Ambient Service</string>
@@ -70,14 +61,4 @@
     <string name="title_home_assistant">Home Assistant Integration</string>
     <string name="pref_ha_title">Home Assistant</string>
     <string name="pref_ha_desc">Sync smart lights and control via Home Assistant automations</string>
-    <string name="ha_master_toggle">Enable Home Assistant Sync</string>
-    <string name="ha_master_toggle_desc">Send ambient screen colors to selected Home Assistant lights</string>
-    <string name="ha_server_host">Home Assistant Host / IP</string>
-    <string name="ha_server_port">Port (Default 8123)</string>
-    <string name="ha_use_ssl">Use SSL (HTTPS / WSS)</string>
-    <string name="ha_token">Long-Lived Access Token</string>
-    <string name="ha_test_connection">Test Connection</string>
-    <string name="ha_fetch_lights">Discover Lights</string>
-    <string name="ha_lights_section">Configured Smart Lights</string>
-    <string name="ha_lights_empty">No lights configured. Enter server details and click Discover Lights.</string>
 </resources>

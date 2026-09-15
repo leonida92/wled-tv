@@ -247,8 +247,9 @@ class HomeAssistantWebSocketClient {
                 .addHeader("Authorization", "Bearer ${config.token}")
                 .build()
 
-            val response = httpClient.newCall(request).execute()
-            response.isSuccessful
+            httpClient.newCall(request).execute().use { response ->
+                response.isSuccessful
+            }
         } catch (_: Exception) {
             false
         }
@@ -309,7 +310,7 @@ class HomeAssistantWebSocketClient {
                         entityId = entityId,
                         name = friendlyName,
                         capability = capability,
-                        enabled = true
+                        enabled = false
                     )
                 )
             }

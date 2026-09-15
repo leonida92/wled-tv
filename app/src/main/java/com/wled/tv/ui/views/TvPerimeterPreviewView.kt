@@ -90,8 +90,31 @@ class TvPerimeterPreviewView @JvmOverloads constructor(
         color = Color.parseColor("#1A38BDF8")
     }
 
+    private class DeviceRenderGeometry(
+        val deviceId: String,
+        val enabled: Boolean,
+        val type: DeviceType,
+        val pointCoords: FloatArray,
+        val pointCount: Int,
+        val radius: Float,
+        val idleColors: IntArray,
+        val hasCornerIndicator: Boolean = false,
+        val cornerX: Float = 0f,
+        val cornerY: Float = 0f,
+        val customBoxRect: RectF? = null
+    )
+
+    private var geometryDirty: Boolean = true
+    private var lastW: Float = 0f
+    private var lastH: Float = 0f
+    private val cachedTvRect = RectF()
+    private val cachedScreenRect = RectF()
+    private val cachedGeometries = ArrayList<DeviceRenderGeometry>()
+    private val disabledDiodeColor = Color.parseColor("#272733")
+
     fun updateDevices(devices: List<WledDevice>) {
         this.devices = devices
+        geometryDirty = true
         invalidate()
     }
 
@@ -101,6 +124,7 @@ class TvPerimeterPreviewView @JvmOverloads constructor(
         } else {
             this.devices = listOf(devices[0].copy(perimeter = config)) + devices.drop(1)
         }
+        geometryDirty = true
         invalidate()
     }
 
@@ -142,16 +166,20 @@ class TvPerimeterPreviewView @JvmOverloads constructor(
         postInvalidate()
     }
 
-    override fun onDraw(canvas: Canvas) {
-        super.onDraw(canvas)
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        geometryDirty = true
+    }
 
-        val w = width.toFloat()
-        val h = height.toFloat()
-        if (w <= 0 || h <= 0) return
+    private fun rebuildGeometry(w: Float, h: Float) {
+        if (w <= 0f || h <= 0f) return
+        lastW = w
+        lastH = h
+        geometryDirty = false
+        cachedGeometries.clear()
 
         val displayDevices = devices.ifEmpty { listOf(WledDevice()) }
 
-        // 1. Calculate layer counts per edge to guarantee no preset is ever pushed off canvas
         var leftLayers = 0
         var rightLayers = 0
         var topLayers = 0
@@ -179,7 +207,6 @@ class TvPerimeterPreviewView @JvmOverloads constructor(
         topLayers = topLayers.coerceAtLeast(1)
         bottomLayers = bottomLayers.coerceAtLeast(1)
 
-        // Dynamic diode radius and layer spacing
         val baseRadius = (min(w, h) * 0.019f).coerceIn(3.0f, 7.5f)
         val layerSpacing = baseRadius * 3.0f
 
@@ -205,74 +232,24 @@ class TvPerimeterPreviewView @JvmOverloads constructor(
 
         val left = padLeft + (availW - tvWidth) / 2f
         val top = padTop + (availH - tvHeight) / 2f
-        val tvRect = RectF(left, top, left + tvWidth, top + tvHeight)
-
-        // 2. Draw TV chassis & screen
-        canvas.drawRoundRect(tvRect, 14f, 14f, tvBodyPaint)
-        canvas.drawRoundRect(tvRect, 14f, 14f, tvBezelPaint)
+        cachedTvRect.set(left, top, left + tvWidth, top + tvHeight)
 
         val screenInset = 6f
-        val screenRect = RectF(
-            tvRect.left + screenInset,
-            tvRect.top + screenInset,
-            tvRect.right - screenInset,
-            tvRect.bottom - screenInset
+        cachedScreenRect.set(
+            cachedTvRect.left + screenInset,
+            cachedTvRect.top + screenInset,
+            cachedTvRect.right - screenInset,
+            cachedTvRect.bottom - screenInset
         )
-        canvas.drawRoundRect(screenRect, 10f, 10f, tvScreenPaint)
-        canvas.drawRoundRect(screenRect, 10f, 10f, tvScreenInnerPaint)
 
-        // TV Brand Text
-        tvLogoTextPaint.textSize = (tvHeight * 0.08f).coerceIn(11f, 18f)
-        canvas.drawText("WLED AMBIENT SYNC", tvRect.centerX(), tvRect.centerY() + tvLogoTextPaint.textSize * 0.35f, tvLogoTextPaint)
-
-        // 3. Draw All Device Presets
         var curTopLayer = 0
         var curRightLayer = 0
         var curBottomLayer = 0
         var curLeftLayer = 0
 
+        val hsvTemp = floatArrayOf(0f, 0.85f, 0.95f)
+
         for ((deviceIndex, device) in displayDevices.withIndex()) {
-            val colors = deviceColors[device.id]
-            val liveCount = deviceCounts[device.id] ?: 0
-            val hasLiveColors = isLiveActive && colors != null && liveCount > 0
-
-            fun getDeviceLedColor(index: Int, total: Int): Int {
-                if (!device.enabled) {
-                    return Color.parseColor("#272733")
-                }
-                if (hasLiveColors && index < liveCount && (index * 3 + 2) < colors!!.size) {
-                    val r = colors[index * 3].toInt() and 0xFF
-                    val g = colors[index * 3 + 1].toInt() and 0xFF
-                    val b = colors[index * 3 + 2].toInt() and 0xFF
-                    return Color.rgb(r, g, b)
-                }
-                // Idle multi-chroma ambient gradient
-                val hue = if (total > 1) (index.toFloat() / total) * 360f else (deviceIndex * 70f) % 360f
-                return Color.HSVToColor(floatArrayOf(hue, 0.85f, 0.95f))
-            }
-
-            fun drawDiodes(points: List<PointF>, radius: Float) {
-                for (i in points.indices) {
-                    val pt = points[i]
-                    val diodeColor = getDeviceLedColor(i, points.size)
-
-                    if (device.enabled) {
-                        diodeGlowPaint.color = diodeColor
-                        diodeGlowPaint.alpha = 50
-                        canvas.drawCircle(pt.x, pt.y, radius * 1.55f, diodeGlowPaint)
-                    }
-
-                    canvas.drawCircle(pt.x, pt.y, radius, diodeRimPaint)
-
-                    diodeCorePaint.color = diodeColor
-                    canvas.drawCircle(pt.x, pt.y, radius * 0.8f, diodeCorePaint)
-
-                    if (device.enabled) {
-                        canvas.drawCircle(pt.x, pt.y, radius * 0.35f, diodeHotspotPaint)
-                    }
-                }
-            }
-
             when (device.type) {
                 DeviceType.PERIMETER -> {
                     val p = device.perimeter
@@ -286,37 +263,37 @@ class TvPerimeterPreviewView @JvmOverloads constructor(
 
                     val topPoints = ArrayList<PointF>(p.topLeds)
                     if (p.topLeds > 0) {
-                        val cy = tvRect.top - topOffset
-                        val step = (tvRect.width() - 8f) / p.topLeds
+                        val cy = cachedTvRect.top - topOffset
+                        val step = (cachedTvRect.width() - 8f) / p.topLeds
                         for (i in 0 until p.topLeds) {
-                            topPoints.add(PointF(tvRect.left + 4f + (i + 0.5f) * step, cy))
+                            topPoints.add(PointF(cachedTvRect.left + 4f + (i + 0.5f) * step, cy))
                         }
                     }
 
                     val rightPoints = ArrayList<PointF>(p.rightLeds)
                     if (p.rightLeds > 0) {
-                        val cx = tvRect.right + rightOffset
-                        val step = (tvRect.height() - 8f) / p.rightLeds
+                        val cx = cachedTvRect.right + rightOffset
+                        val step = (cachedTvRect.height() - 8f) / p.rightLeds
                         for (i in 0 until p.rightLeds) {
-                            rightPoints.add(PointF(cx, tvRect.top + 4f + (i + 0.5f) * step))
+                            rightPoints.add(PointF(cx, cachedTvRect.top + 4f + (i + 0.5f) * step))
                         }
                     }
 
                     val bottomPoints = ArrayList<PointF>(p.bottomLeds)
                     if (p.bottomLeds > 0) {
-                        val cy = tvRect.bottom + bottomOffset
-                        val step = (tvRect.width() - 8f) / p.bottomLeds
+                        val cy = cachedTvRect.bottom + bottomOffset
+                        val step = (cachedTvRect.width() - 8f) / p.bottomLeds
                         for (i in 0 until p.bottomLeds) {
-                            bottomPoints.add(PointF(tvRect.right - 4f - (i + 0.5f) * step, cy))
+                            bottomPoints.add(PointF(cachedTvRect.right - 4f - (i + 0.5f) * step, cy))
                         }
                     }
 
                     val leftPoints = ArrayList<PointF>(p.leftLeds)
                     if (p.leftLeds > 0) {
-                        val cx = tvRect.left - leftOffset
-                        val step = (tvRect.height() - 8f) / p.leftLeds
+                        val cx = cachedTvRect.left - leftOffset
+                        val step = (cachedTvRect.height() - 8f) / p.leftLeds
                         for (i in 0 until p.leftLeds) {
-                            leftPoints.add(PointF(cx, tvRect.bottom - 4f - (i + 0.5f) * step))
+                            leftPoints.add(PointF(cx, cachedTvRect.bottom - 4f - (i + 0.5f) * step))
                         }
                     }
 
@@ -349,113 +326,327 @@ class TvPerimeterPreviewView @JvmOverloads constructor(
                     }
 
                     val finalPoints = if (p.direction == Direction.CLOCKWISE) clockwisePoints else clockwisePoints.reversed()
-                    drawDiodes(finalPoints, baseRadius)
-
-                    // Subtle start corner ring
-                    if (deviceIndex == 0 && totalLeds > 1) {
-                        val cornerX = when (p.startCorner) {
-                            Corner.TOP_LEFT, Corner.BOTTOM_LEFT -> tvRect.left - leftOffset
-                            Corner.TOP_RIGHT, Corner.BOTTOM_RIGHT -> tvRect.right + rightOffset
-                        }
-                        val cornerY = when (p.startCorner) {
-                            Corner.TOP_LEFT, Corner.TOP_RIGHT -> tvRect.top - topOffset
-                            Corner.BOTTOM_LEFT, Corner.BOTTOM_RIGHT -> tvRect.bottom + bottomOffset
-                        }
-                        canvas.drawCircle(cornerX, cornerY, baseRadius * 1.3f, cornerIndicatorPaint)
+                    val pointCoords = FloatArray(finalPoints.size * 2)
+                    val idleColors = IntArray(finalPoints.size)
+                    for (i in finalPoints.indices) {
+                        val pt = finalPoints[i]
+                        pointCoords[i * 2] = pt.x
+                        pointCoords[i * 2 + 1] = pt.y
+                        hsvTemp[0] = if (finalPoints.size > 1) (i.toFloat() / finalPoints.size) * 360f else (deviceIndex * 70f) % 360f
+                        idleColors[i] = Color.HSVToColor(hsvTemp)
                     }
+
+                    var hasCorner = false
+                    var cX = 0f
+                    var cY = 0f
+                    if (deviceIndex == 0 && totalLeds > 1) {
+                        hasCorner = true
+                        cX = when (p.startCorner) {
+                            Corner.TOP_LEFT, Corner.BOTTOM_LEFT -> cachedTvRect.left - leftOffset
+                            Corner.TOP_RIGHT, Corner.BOTTOM_RIGHT -> cachedTvRect.right + rightOffset
+                        }
+                        cY = when (p.startCorner) {
+                            Corner.TOP_LEFT, Corner.TOP_RIGHT -> cachedTvRect.top - topOffset
+                            Corner.BOTTOM_LEFT, Corner.BOTTOM_RIGHT -> cachedTvRect.bottom + bottomOffset
+                        }
+                    }
+
+                    cachedGeometries.add(
+                        DeviceRenderGeometry(
+                            deviceId = device.id,
+                            enabled = device.enabled,
+                            type = device.type,
+                            pointCoords = pointCoords,
+                            pointCount = finalPoints.size,
+                            radius = baseRadius,
+                            idleColors = idleColors,
+                            hasCornerIndicator = hasCorner,
+                            cornerX = cX,
+                            cornerY = cY
+                        )
+                    )
                 }
 
                 DeviceType.LEFT_AMBIENT -> {
                     val count = device.totalLeds
                     val offset = (baseRadius * 1.8f) + (curLeftLayer++ * layerSpacing)
-                    val cx = tvRect.left - offset
-                    val points = ArrayList<PointF>(count)
+                    val cx = cachedTvRect.left - offset
+                    val coords = FloatArray(count * 2)
+                    val idleColors = IntArray(count)
                     if (count == 1) {
-                        points.add(PointF(cx, tvRect.centerY()))
+                        coords[0] = cx
+                        coords[1] = cachedTvRect.centerY()
+                        hsvTemp[0] = (deviceIndex * 70f) % 360f
+                        idleColors[0] = Color.HSVToColor(hsvTemp)
                     } else {
-                        val step = (tvRect.height() * 0.7f) / count
-                        val startY = tvRect.centerY() - (step * (count - 1) / 2f)
+                        val step = (cachedTvRect.height() * 0.7f) / count
+                        val startY = cachedTvRect.centerY() - (step * (count - 1) / 2f)
                         for (i in 0 until count) {
-                            points.add(PointF(cx, startY + (i * step)))
+                            coords[i * 2] = cx
+                            coords[i * 2 + 1] = startY + (i * step)
+                            hsvTemp[0] = (i.toFloat() / count) * 360f
+                            idleColors[i] = Color.HSVToColor(hsvTemp)
                         }
                     }
-                    drawDiodes(points, if (count == 1) baseRadius * 1.3f else baseRadius)
+                    cachedGeometries.add(
+                        DeviceRenderGeometry(
+                            deviceId = device.id,
+                            enabled = device.enabled,
+                            type = device.type,
+                            pointCoords = coords,
+                            pointCount = count,
+                            radius = if (count == 1) baseRadius * 1.3f else baseRadius,
+                            idleColors = idleColors
+                        )
+                    )
                 }
 
                 DeviceType.RIGHT_AMBIENT -> {
                     val count = device.totalLeds
                     val offset = (baseRadius * 1.8f) + (curRightLayer++ * layerSpacing)
-                    val cx = tvRect.right + offset
-                    val points = ArrayList<PointF>(count)
+                    val cx = cachedTvRect.right + offset
+                    val coords = FloatArray(count * 2)
+                    val idleColors = IntArray(count)
                     if (count == 1) {
-                        points.add(PointF(cx, tvRect.centerY()))
+                        coords[0] = cx
+                        coords[1] = cachedTvRect.centerY()
+                        hsvTemp[0] = (deviceIndex * 70f) % 360f
+                        idleColors[0] = Color.HSVToColor(hsvTemp)
                     } else {
-                        val step = (tvRect.height() * 0.7f) / count
-                        val startY = tvRect.centerY() - (step * (count - 1) / 2f)
+                        val step = (cachedTvRect.height() * 0.7f) / count
+                        val startY = cachedTvRect.centerY() - (step * (count - 1) / 2f)
                         for (i in 0 until count) {
-                            points.add(PointF(cx, startY + (i * step)))
+                            coords[i * 2] = cx
+                            coords[i * 2 + 1] = startY + (i * step)
+                            hsvTemp[0] = (i.toFloat() / count) * 360f
+                            idleColors[i] = Color.HSVToColor(hsvTemp)
                         }
                     }
-                    drawDiodes(points, if (count == 1) baseRadius * 1.3f else baseRadius)
+                    cachedGeometries.add(
+                        DeviceRenderGeometry(
+                            deviceId = device.id,
+                            enabled = device.enabled,
+                            type = device.type,
+                            pointCoords = coords,
+                            pointCount = count,
+                            radius = if (count == 1) baseRadius * 1.3f else baseRadius,
+                            idleColors = idleColors
+                        )
+                    )
                 }
 
                 DeviceType.TOP_AMBIENT -> {
                     val count = device.totalLeds
                     val offset = (baseRadius * 1.8f) + (curTopLayer++ * layerSpacing)
-                    val cy = tvRect.top - offset
-                    val points = ArrayList<PointF>(count)
+                    val cy = cachedTvRect.top - offset
+                    val coords = FloatArray(count * 2)
+                    val idleColors = IntArray(count)
                     if (count == 1) {
-                        points.add(PointF(tvRect.centerX(), cy))
+                        coords[0] = cachedTvRect.centerX()
+                        coords[1] = cy
+                        hsvTemp[0] = (deviceIndex * 70f) % 360f
+                        idleColors[0] = Color.HSVToColor(hsvTemp)
                     } else {
-                        val step = (tvRect.width() * 0.7f) / count
-                        val startX = tvRect.centerX() - (step * (count - 1) / 2f)
+                        val step = (cachedTvRect.width() * 0.7f) / count
+                        val startX = cachedTvRect.centerX() - (step * (count - 1) / 2f)
                         for (i in 0 until count) {
-                            points.add(PointF(startX + (i * step), cy))
+                            coords[i * 2] = startX + (i * step)
+                            coords[i * 2 + 1] = cy
+                            hsvTemp[0] = (i.toFloat() / count) * 360f
+                            idleColors[i] = Color.HSVToColor(hsvTemp)
                         }
                     }
-                    drawDiodes(points, if (count == 1) baseRadius * 1.3f else baseRadius)
+                    cachedGeometries.add(
+                        DeviceRenderGeometry(
+                            deviceId = device.id,
+                            enabled = device.enabled,
+                            type = device.type,
+                            pointCoords = coords,
+                            pointCount = count,
+                            radius = if (count == 1) baseRadius * 1.3f else baseRadius,
+                            idleColors = idleColors
+                        )
+                    )
                 }
 
                 DeviceType.BOTTOM_AMBIENT -> {
                     val count = device.totalLeds
                     val offset = (baseRadius * 1.8f) + (curBottomLayer++ * layerSpacing)
-                    val cy = tvRect.bottom + offset
-                    val points = ArrayList<PointF>(count)
+                    val cy = cachedTvRect.bottom + offset
+                    val coords = FloatArray(count * 2)
+                    val idleColors = IntArray(count)
                     if (count == 1) {
-                        points.add(PointF(tvRect.centerX(), cy))
+                        coords[0] = cachedTvRect.centerX()
+                        coords[1] = cy
+                        hsvTemp[0] = (deviceIndex * 70f) % 360f
+                        idleColors[0] = Color.HSVToColor(hsvTemp)
                     } else {
-                        val step = (tvRect.width() * 0.7f) / count
-                        val startX = tvRect.centerX() - (step * (count - 1) / 2f)
+                        val step = (cachedTvRect.width() * 0.7f) / count
+                        val startX = cachedTvRect.centerX() - (step * (count - 1) / 2f)
                         for (i in 0 until count) {
-                            points.add(PointF(startX + (i * step), cy))
+                            coords[i * 2] = startX + (i * step)
+                            coords[i * 2 + 1] = cy
+                            hsvTemp[0] = (i.toFloat() / count) * 360f
+                            idleColors[i] = Color.HSVToColor(hsvTemp)
                         }
                     }
-                    drawDiodes(points, if (count == 1) baseRadius * 1.3f else baseRadius)
+                    cachedGeometries.add(
+                        DeviceRenderGeometry(
+                            deviceId = device.id,
+                            enabled = device.enabled,
+                            type = device.type,
+                            pointCoords = coords,
+                            pointCount = count,
+                            radius = if (count == 1) baseRadius * 1.3f else baseRadius,
+                            idleColors = idleColors
+                        )
+                    )
                 }
 
                 DeviceType.FULL_SCREEN -> {
-                    if (device.enabled) {
-                        val color = getDeviceLedColor(0, 1)
-                        zoneFillPaint.color = color
-                        zoneFillPaint.alpha = 40
-                        canvas.drawRoundRect(screenRect, 10f, 10f, zoneFillPaint)
-                    }
+                    hsvTemp[0] = (deviceIndex * 70f) % 360f
+                    val idleColors = intArrayOf(Color.HSVToColor(hsvTemp))
+                    cachedGeometries.add(
+                        DeviceRenderGeometry(
+                            deviceId = device.id,
+                            enabled = device.enabled,
+                            type = device.type,
+                            pointCoords = FloatArray(0),
+                            pointCount = 0,
+                            radius = 0f,
+                            idleColors = idleColors
+                        )
+                    )
                 }
 
                 DeviceType.CUSTOM_BOX -> {
                     val region = device.customRect
                     val boxRect = RectF(
-                        screenRect.left + (region.left * screenRect.width()),
-                        screenRect.top + (region.top * screenRect.height()),
-                        screenRect.left + (region.right * screenRect.width()),
-                        screenRect.top + (region.bottom * screenRect.height())
+                        cachedScreenRect.left + (region.left * cachedScreenRect.width()),
+                        cachedScreenRect.top + (region.top * cachedScreenRect.height()),
+                        cachedScreenRect.left + (region.right * cachedScreenRect.width()),
+                        cachedScreenRect.top + (region.bottom * cachedScreenRect.height())
                     )
-                    val color = getDeviceLedColor(0, 1)
-                    zoneBoxPaint.color = color
-                    zoneFillPaint.color = color
-                    zoneFillPaint.alpha = 50
-                    canvas.drawRoundRect(boxRect, 6f, 6f, zoneFillPaint)
-                    canvas.drawRoundRect(boxRect, 6f, 6f, zoneBoxPaint)
+                    hsvTemp[0] = (deviceIndex * 70f) % 360f
+                    val idleColors = intArrayOf(Color.HSVToColor(hsvTemp))
+                    cachedGeometries.add(
+                        DeviceRenderGeometry(
+                            deviceId = device.id,
+                            enabled = device.enabled,
+                            type = device.type,
+                            pointCoords = FloatArray(0),
+                            pointCount = 0,
+                            radius = 0f,
+                            idleColors = idleColors,
+                            customBoxRect = boxRect
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+
+        val w = width.toFloat()
+        val h = height.toFloat()
+        if (w <= 0 || h <= 0) return
+
+        if (geometryDirty || w != lastW || h != lastH || cachedGeometries.isEmpty()) {
+            rebuildGeometry(w, h)
+        }
+
+        // Draw TV chassis & screen
+        canvas.drawRoundRect(cachedTvRect, 14f, 14f, tvBodyPaint)
+        canvas.drawRoundRect(cachedTvRect, 14f, 14f, tvBezelPaint)
+        canvas.drawRoundRect(cachedScreenRect, 10f, 10f, tvScreenPaint)
+        canvas.drawRoundRect(cachedScreenRect, 10f, 10f, tvScreenInnerPaint)
+
+        // TV Brand Text
+        tvLogoTextPaint.textSize = (cachedTvRect.height() * 0.08f).coerceIn(11f, 18f)
+        canvas.drawText(
+            "WLED AMBIENT SYNC",
+            cachedTvRect.centerX(),
+            cachedTvRect.centerY() + tvLogoTextPaint.textSize * 0.35f,
+            tvLogoTextPaint
+        )
+
+        // Draw All Device Presets
+        for (geom in cachedGeometries) {
+            val colors = deviceColors[geom.deviceId]
+            val liveCount = deviceCounts[geom.deviceId] ?: 0
+            val hasLiveColors = isLiveActive && colors != null && liveCount > 0
+
+            when (geom.type) {
+                DeviceType.FULL_SCREEN -> {
+                    if (geom.enabled) {
+                        val color = if (hasLiveColors && liveCount > 0 && colors!!.size >= 3) {
+                            Color.rgb(colors[0].toInt() and 0xFF, colors[1].toInt() and 0xFF, colors[2].toInt() and 0xFF)
+                        } else {
+                            geom.idleColors[0]
+                        }
+                        zoneFillPaint.color = color
+                        zoneFillPaint.alpha = 40
+                        canvas.drawRoundRect(cachedScreenRect, 10f, 10f, zoneFillPaint)
+                    }
+                }
+
+                DeviceType.CUSTOM_BOX -> {
+                    val boxRect = geom.customBoxRect
+                    if (boxRect != null) {
+                        val color = if (hasLiveColors && liveCount > 0 && colors!!.size >= 3) {
+                            Color.rgb(colors[0].toInt() and 0xFF, colors[1].toInt() and 0xFF, colors[2].toInt() and 0xFF)
+                        } else {
+                            geom.idleColors[0]
+                        }
+                        zoneBoxPaint.color = color
+                        zoneFillPaint.color = color
+                        zoneFillPaint.alpha = 50
+                        canvas.drawRoundRect(boxRect, 6f, 6f, zoneFillPaint)
+                        canvas.drawRoundRect(boxRect, 6f, 6f, zoneBoxPaint)
+                    }
+                }
+
+                else -> {
+                    val coords = geom.pointCoords
+                    val count = geom.pointCount
+                    val radius = geom.radius
+                    val enabled = geom.enabled
+
+                    for (i in 0 until count) {
+                        val px = coords[i * 2]
+                        val py = coords[i * 2 + 1]
+                        val diodeColor = if (!enabled) {
+                            disabledDiodeColor
+                        } else if (hasLiveColors && i < liveCount && (i * 3 + 2) < colors!!.size) {
+                            val r = colors[i * 3].toInt() and 0xFF
+                            val g = colors[i * 3 + 1].toInt() and 0xFF
+                            val b = colors[i * 3 + 2].toInt() and 0xFF
+                            Color.rgb(r, g, b)
+                        } else {
+                            geom.idleColors[i]
+                        }
+
+                        if (enabled) {
+                            diodeGlowPaint.color = diodeColor
+                            diodeGlowPaint.alpha = 50
+                            canvas.drawCircle(px, py, radius * 1.55f, diodeGlowPaint)
+                        }
+
+                        canvas.drawCircle(px, py, radius, diodeRimPaint)
+
+                        diodeCorePaint.color = diodeColor
+                        canvas.drawCircle(px, py, radius * 0.8f, diodeCorePaint)
+
+                        if (enabled) {
+                            canvas.drawCircle(px, py, radius * 0.35f, diodeHotspotPaint)
+                        }
+                    }
+
+                    if (geom.hasCornerIndicator) {
+                        canvas.drawCircle(geom.cornerX, geom.cornerY, radius * 1.3f, cornerIndicatorPaint)
+                    }
                 }
             }
         }

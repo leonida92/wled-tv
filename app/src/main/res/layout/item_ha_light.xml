@@ -1,10 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/itemHaLightRoot"
     style="@style/TvSettingItem"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
+    android:descendantFocusability="afterDescendants"
+    android:focusable="false"
+    android:clickable="false"
     android:gravity="center_vertical"
     android:orientation="horizontal">
 
@@ -16,6 +20,7 @@
         app:tint="@color/text_secondary" />
 
     <LinearLayout
+        android:id="@+id/layoutLightInfo"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_marginStart="16dp"
@@ -36,7 +41,7 @@
                 android:ellipsize="end"
                 android:maxLines="1"
                 android:singleLine="true"
-                android:text="Light Name" />
+                tools:text="Light Name" />
 
             <TextView
                 android:id="@+id/tvCapabilityBadge"
@@ -48,7 +53,7 @@
                 android:paddingTop="2dp"
                 android:paddingEnd="8dp"
                 android:paddingBottom="2dp"
-                android:text="RGB + Dim"
+                tools:text="RGB + Dim"
                 android:textColor="@color/accent_cyan"
                 android:textSize="11sp"
                 android:textStyle="bold" />
@@ -59,21 +64,59 @@
             style="@style/TvSettingSub"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="light.entity_id" />
+            tools:text="light.entity_id" />
     </LinearLayout>
 
-    <TextView
-        android:id="@+id/tvLightStatusPill"
+    <!-- Configure / Zone Pill Button -->
+    <LinearLayout
+        android:id="@+id/btnConfigureLight"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:background="@drawable/bg_pill_button"
+        android:background="@drawable/bg_pill_selector"
+        android:clickable="true"
+        android:focusable="true"
+        android:gravity="center"
+        android:nextFocusRight="@+id/btnToggleLight"
         android:paddingStart="14dp"
-        android:paddingTop="5dp"
+        android:paddingTop="8dp"
         android:paddingEnd="14dp"
-        android:paddingBottom="5dp"
-        android:text="Full Screen • 100%"
-        android:textColor="@color/accent_cyan"
-        android:textSize="13sp"
-        android:textStyle="bold" />
+        android:paddingBottom="8dp">
+
+        <TextView
+            android:id="@+id/tvLightStatusPill"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            tools:text="Full Screen • 100%"
+            android:textColor="@color/accent_cyan"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <!-- Direct Enable/Disable Toggle Button on Card -->
+    <LinearLayout
+        android:id="@+id/btnToggleLight"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="10dp"
+        android:background="@drawable/bg_pill_selector"
+        android:clickable="true"
+        android:focusable="true"
+        android:gravity="center"
+        android:minWidth="64dp"
+        android:nextFocusLeft="@+id/btnConfigureLight"
+        android:paddingStart="14dp"
+        android:paddingTop="8dp"
+        android:paddingEnd="14dp"
+        android:paddingBottom="8dp">
+
+        <TextView
+            android:id="@+id/tvToggleLight"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            tools:text="OFF"
+            android:textColor="@color/text_muted"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+    </LinearLayout>
 
 </LinearLayout>

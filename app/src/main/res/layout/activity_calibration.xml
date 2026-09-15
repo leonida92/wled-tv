@@ -41,7 +41,7 @@
         android:orientation="vertical"
         android:paddingStart="28dp"
         android:paddingTop="18dp"
-        android:paddingEnd="28dp"
+        android:paddingEnd="12dp"
         android:paddingBottom="18dp">
 
         <!-- Header & Reference Color Indicator -->
@@ -50,6 +50,7 @@
             android:layout_height="wrap_content"
             android:gravity="center_vertical"
             android:orientation="horizontal"
+            android:layout_marginEnd="16dp"
             android:layout_marginBottom="10dp">
 
             <TextView
@@ -82,11 +83,13 @@
             android:text="Select Reference Color to display on screen edges &amp; LEDs for side-by-side matching:"
             android:textColor="@color/text_secondary"
             android:textSize="12sp"
+            android:layout_marginEnd="16dp"
             android:layout_marginBottom="6dp" />
 
         <HorizontalScrollView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginEnd="16dp"
             android:layout_marginBottom="10dp"
             android:scrollbars="none">
 
@@ -213,11 +216,14 @@
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1"
-            android:clipToPadding="false">
+            android:clipToPadding="false"
+            android:fadeScrollbars="false"
+            android:scrollbars="vertical">
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:layout_marginEnd="16dp"
                 android:orientation="vertical">
 
                 <!-- Saturation Multiplier -->

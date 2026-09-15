@@ -7,13 +7,14 @@
     android:orientation="vertical"
     android:paddingStart="48dp"
     android:paddingTop="24dp"
-    android:paddingEnd="48dp"
+    android:paddingEnd="20dp"
     android:paddingBottom="24dp">
 
     <!-- Header -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:layout_marginEnd="28dp"
         android:layout_marginBottom="16dp"
         android:gravity="center_vertical"
         android:orientation="horizontal">
@@ -56,12 +57,15 @@
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:clipToPadding="false">
+        android:clipToPadding="false"
+        android:fadeScrollbars="false"
+        android:scrollbars="vertical">
 
         <LinearLayout
             android:id="@+id/layoutDeviceList"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginEnd="28dp"
             android:orientation="vertical">
 
             <!-- Dynamic device cards injected here -->

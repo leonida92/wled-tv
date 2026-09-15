@@ -77,6 +77,7 @@ class DeviceManagerActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         testJob?.cancel()
+        udpSender.close()
     }
 
     private fun bindViews() {
