@@ -4,6 +4,8 @@ import android.graphics.RectF
 import android.media.Image
 import com.wled.tv.model.ColorCalibration
 import com.wled.tv.model.DeviceType
+import com.wled.tv.model.HomeAssistantLight
+import com.wled.tv.model.HomeAssistantZoneType
 import com.wled.tv.model.PerimeterConfig
 import com.wled.tv.model.WledDevice
 import java.nio.ByteBuffer
@@ -222,6 +224,48 @@ class ScreenColorProcessor {
         val filter = smoothingFilters.getOrPut(device.id) { ColorSmoothingFilter() }
         filter.apply(rawRgbBuffer, ledCount, calibration.smoothingFactor, outputRgb)
         return true
+    }
+
+    /**
+     * Extracts color and brightness for a Home Assistant light based on its configured zone or custom bounding box.
+     * Returns IntArray [R, G, B, Brightness (0-255)].
+     */
+    fun processHaLight(
+        image: Image,
+        light: HomeAssistantLight,
+        calibration: ColorCalibration
+    ): IntArray? {
+        val planes = image.planes
+        if (planes.isEmpty()) return null
+        val plane = planes[0]
+        val buffer = plane.buffer ?: return null
+
+        val width = image.width
+        val height = image.height
+        val rowStride = plane.rowStride
+        val pixelStride = plane.pixelStride
+
+        val topCrop = if (detectedTopCrop > 0.005f) detectedTopCrop else 0f
+        val bottomCrop = if (detectedBottomCrop > 0.005f) detectedBottomCrop else 0f
+        val activeTop = topCrop.coerceIn(0f, 0.40f)
+        val activeBottom = (1.0f - bottomCrop).coerceIn(0.60f, 1.0f)
+        val activeHeight = (activeBottom - activeTop).coerceAtLeast(0.1f)
+
+        val targetRect = when (light.zoneType) {
+            HomeAssistantZoneType.FULL_SCREEN_AVERAGE -> RectF(0f, activeTop, 1f, activeBottom)
+            HomeAssistantZoneType.LEFT_AMBIENT -> RectF(0f, activeTop, 0.25f, activeBottom)
+            HomeAssistantZoneType.RIGHT_AMBIENT -> RectF(0.75f, activeTop, 1f, activeBottom)
+            HomeAssistantZoneType.TOP_AMBIENT -> RectF(0f, activeTop, 1f, activeTop + 0.25f * activeHeight)
+            HomeAssistantZoneType.BOTTOM_AMBIENT -> RectF(0f, activeBottom - 0.25f * activeHeight, 1f, activeBottom)
+            HomeAssistantZoneType.CUSTOM_RECT -> light.customRect
+        }
+
+        val rgbBytes = sampleChromaWeightedBox(buffer, width, height, rowStride, pixelStride, targetRect, calibration)
+        val r = rgbBytes[0].toInt() and 0xFF
+        val g = rgbBytes[1].toInt() and 0xFF
+        val b = rgbBytes[2].toInt() and 0xFF
+        val bri = max(r, max(g, b))
+        return intArrayOf(r, g, b, bri)
     }
 
     private fun sampleChromaWeightedBox(

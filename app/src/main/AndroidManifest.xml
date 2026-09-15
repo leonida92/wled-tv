@@ -85,12 +85,32 @@
             android:exported="false"
             android:screenOrientation="landscape" />
 
+        <!-- Home Assistant Integration Settings -->
+        <activity
+            android:name=".ui.HomeAssistantSettingsActivity"
+            android:exported="false"
+            android:windowSoftInputMode="stateAlwaysHidden|adjustResize"
+            android:screenOrientation="landscape" />
+
         <!-- Ambient MediaProjection Background Service -->
         <service
             android:name=".service.AmbientCaptureService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="mediaProjection" />
+
+        <!-- External Automation Receiver for Home Assistant / ADB -->
+        <receiver
+            android:name=".service.ControlReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.wled.tv.ACTION_START" />
+                <action android:name="com.wled.tv.ACTION_STOP" />
+                <action android:name="com.wled.tv.ACTION_TOGGLE" />
+                <action android:name="com.wled.tv.ACTION_RELOAD_CONFIG" />
+            </intent-filter>
+        </receiver>
 
         <!-- Boot Receiver for Auto-Start on TV Power On -->
         <receiver

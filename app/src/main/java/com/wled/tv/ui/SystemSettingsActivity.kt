@@ -7,6 +7,7 @@ import android.graphics.Color
 import android.os.Bundle
 import android.view.KeyEvent
 import android.view.View
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -40,6 +41,13 @@ class SystemSettingsActivity : AppCompatActivity() {
     private lateinit var itemAutoStartSetting: LinearLayout
     private lateinit var tvSystemAutoStartValue: TextView
 
+    private lateinit var itemHomeAssistantSetting: LinearLayout
+    private lateinit var ivSystemHaIcon: ImageView
+    private lateinit var btnSystemHaToggle: LinearLayout
+    private lateinit var tvSystemHaToggle: TextView
+    private lateinit var btnSystemHaConfigure: LinearLayout
+    private lateinit var tvSystemHaConfigure: TextView
+
     private lateinit var itemCheckUpdateSetting: LinearLayout
     private lateinit var tvAppVersionSummary: TextView
     private lateinit var tvUpdateActionText: TextView
@@ -57,6 +65,12 @@ class SystemSettingsActivity : AppCompatActivity() {
         updateUiValues()
     }
 
+    override fun onResume() {
+        super.onResume()
+        config = prefsRepo.loadConfig()
+        updateUiValues()
+    }
+
     private fun bindViews() {
         itemScreenZonesSetting = findViewById(R.id.itemScreenZonesSetting)
         itemDeviceManagerSetting = findViewById(R.id.itemDeviceManagerSetting)
@@ -69,6 +83,13 @@ class SystemSettingsActivity : AppCompatActivity() {
 
         itemAutoStartSetting = findViewById(R.id.itemAutoStartSetting)
         tvSystemAutoStartValue = findViewById(R.id.tvSystemAutoStartValue)
+
+        itemHomeAssistantSetting = findViewById(R.id.itemHomeAssistantSetting)
+        ivSystemHaIcon = findViewById(R.id.ivSystemHaIcon)
+        btnSystemHaToggle = findViewById(R.id.btnSystemHaToggle)
+        tvSystemHaToggle = findViewById(R.id.tvSystemHaToggle)
+        btnSystemHaConfigure = findViewById(R.id.btnSystemHaConfigure)
+        tvSystemHaConfigure = findViewById(R.id.tvSystemHaConfigure)
 
         itemCheckUpdateSetting = findViewById(R.id.itemCheckUpdateSetting)
         tvAppVersionSummary = findViewById(R.id.tvAppVersionSummary)
@@ -110,7 +131,21 @@ class SystemSettingsActivity : AppCompatActivity() {
             } else false
         }
 
+        btnSystemHaToggle.setOnClickListener { toggleHomeAssistant() }
+        btnSystemHaConfigure.setOnClickListener {
+            startActivity(Intent(this, HomeAssistantSettingsActivity::class.java))
+        }
+        itemHomeAssistantSetting.setOnClickListener {
+            startActivity(Intent(this, HomeAssistantSettingsActivity::class.java))
+        }
+
         itemCheckUpdateSetting.setOnClickListener { performUpdateCheck() }
+    }
+
+    private fun toggleHomeAssistant() {
+        val nextEnabled = !config.homeAssistant.enabled
+        config = config.copy(homeAssistant = config.homeAssistant.copy(enabled = nextEnabled))
+        saveAndUpdate()
     }
 
     private fun cycleFps() {
@@ -162,6 +197,17 @@ class SystemSettingsActivity : AppCompatActivity() {
         } else {
             tvSystemAutoStartValue.text = "Disabled"
             tvSystemAutoStartValue.setTextColor(Color.parseColor("#94A3B8"))
+        }
+
+        if (config.homeAssistant.enabled) {
+            val count = config.homeAssistant.enabledLights.size
+            tvSystemHaToggle.text = if (count > 0) "Enabled ($count)" else "Enabled"
+            tvSystemHaToggle.setTextColor(Color.parseColor("#00E676"))
+            ivSystemHaIcon.setColorFilter(Color.parseColor("#00E676"))
+        } else {
+            tvSystemHaToggle.text = "Disabled"
+            tvSystemHaToggle.setTextColor(Color.parseColor("#94A3B8"))
+            ivSystemHaIcon.setColorFilter(Color.parseColor("#94A3B8"))
         }
     }
 

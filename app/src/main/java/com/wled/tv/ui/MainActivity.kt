@@ -476,6 +476,15 @@ class MainActivity : AppCompatActivity(),
         }
     }
 
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent?.getBooleanExtra(EXTRA_AUTO_START_TRIGGERED, false) == true && !AmbientCaptureService.isRunning) {
+            intent.removeExtra(EXTRA_AUTO_START_TRIGGERED)
+            requestScreenCapture()
+        }
+    }
+
     override fun onStateChanged(running: Boolean) {
         runOnUiThread {
             tvPreviewView.setLiveActive(running)
@@ -485,5 +494,9 @@ class MainActivity : AppCompatActivity(),
             }
             updateUiState()
         }
+    }
+
+    companion object {
+        const val EXTRA_AUTO_START_TRIGGERED = "EXTRA_AUTO_START_TRIGGERED"
     }
 }

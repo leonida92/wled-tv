@@ -3,7 +3,8 @@ package com.wled.tv.model
 data class WledConfig(
     val devices: List<WledDevice> = listOf(WledDevice()),
     val calibration: ColorCalibration = ColorCalibration(),
-    val autoStartOnBoot: Boolean = false
+    val autoStartOnBoot: Boolean = false,
+    val homeAssistant: HomeAssistantConfig = HomeAssistantConfig()
 ) {
     // Backward compatibility helpers
     val primaryDevice: WledDevice

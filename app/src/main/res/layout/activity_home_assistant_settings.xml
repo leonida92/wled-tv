@@ -14,55 +14,49 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:layout_marginBottom="24dp">
+        android:layout_marginBottom="20dp"
+        android:orientation="vertical">
 
-        <LinearLayout
-            android:layout_width="0dp"
+        <TextView
+            style="@style/TvTitleLarge"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:orientation="vertical">
+            android:text="@string/title_home_assistant" />
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/title_system_settings"
-                style="@style/TvTitleLarge" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:text="Configure screen zones, calibration, light setup, capture performance, and updates"
-                style="@style/TvBody" />
-        </LinearLayout>
+        <TextView
+            style="@style/TvBody"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Synchronize ambient lighting to smart lights and control via automations" />
     </LinearLayout>
 
     <ScrollView
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:clipToPadding="false">
+        android:clipToPadding="false"
+        android:fadeScrollbars="false">
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical">
 
-            <!-- Card 1: Screen Zones & Crop -->
+            <!-- Card 1: Server Connection -->
             <LinearLayout
-                android:id="@+id/itemScreenZonesSetting"
+                android:id="@+id/itemHaServerConnection"
                 style="@style/TvSettingItem"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:gravity="center_vertical"
+                android:nextFocusDown="@+id/btnHaToggleHideDisabled"
                 android:orientation="horizontal">
 
                 <ImageView
                     android:layout_width="24dp"
                     android:layout_height="24dp"
-                    android:src="@drawable/ic_crop"
+                    android:src="@drawable/ic_settings"
                     app:tint="@color/text_secondary" />
 
                 <LinearLayout
@@ -73,74 +67,143 @@
                     android:orientation="vertical">
 
                     <TextView
+                        style="@style/TvSettingTitle"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="@string/btn_zone_editor"
-                        style="@style/TvSettingTitle" />
+                        android:text="Server Connection" />
 
                     <TextView
+                        android:id="@+id/tvHaServerSummary"
+                        style="@style/TvSettingSub"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Letterbox crop margins and sampling regions"
-                        style="@style/TvSettingSub" />
+                        android:text="Not configured" />
                 </LinearLayout>
 
                 <TextView
+                    android:id="@+id/tvHaServerAction"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Open"
+                    android:background="@drawable/bg_pill_button"
+                    android:paddingStart="14dp"
+                    android:paddingTop="5dp"
+                    android:paddingEnd="14dp"
+                    android:paddingBottom="5dp"
+                    android:text="Configure"
                     android:textColor="@color/accent_cyan"
                     android:textSize="13sp"
                     android:textStyle="bold" />
             </LinearLayout>
 
-            <!-- Card 2: Light Setup & Devices -->
+            <!-- Discovered Lights Section Header with Controls -->
             <LinearLayout
-                android:id="@+id/itemDeviceManagerSetting"
-                style="@style/TvSettingItem"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:layout_marginBottom="8dp"
                 android:gravity="center_vertical"
                 android:orientation="horizontal">
 
-                <ImageView
-                    android:layout_width="24dp"
-                    android:layout_height="24dp"
-                    android:src="@drawable/ic_tv"
-                    app:tint="@color/text_secondary" />
-
-                <LinearLayout
+                <TextView
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="16dp"
                     android:layout_weight="1"
-                    android:orientation="vertical">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/btn_settings"
-                        style="@style/TvSettingTitle" />
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Manage controllers, IP addresses, and lighting roles"
-                        style="@style/TvSettingSub" />
-                </LinearLayout>
+                    android:letterSpacing="0.08"
+                    android:text="DISCOVERED LIGHTS"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
 
                 <TextView
+                    android:id="@+id/tvHaLightsCount"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Open"
-                    android:textColor="@color/accent_cyan"
-                    android:textSize="13sp"
-                    android:textStyle="bold" />
+                    android:text="0 lights"
+                    android:textColor="@color/text_muted"
+                    android:textSize="12sp" />
+
+                <!-- Hide Disabled Lights Toggle Pill -->
+                <LinearLayout
+                    android:id="@+id/btnHaToggleHideDisabled"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:layout_marginStart="12dp"
+                    android:background="@drawable/bg_pill_selector"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center"
+                    android:nextFocusUp="@+id/itemHaServerConnection"
+                    android:nextFocusRight="@+id/btnHaRefreshLights"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp">
+
+                    <TextView
+                        android:id="@+id/tvHaHideDisabledText"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Hide Disabled"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="11sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
+
+                <!-- Refresh / Discover Icon Button -->
+                <LinearLayout
+                    android:id="@+id/btnHaRefreshLights"
+                    android:layout_width="36dp"
+                    android:layout_height="36dp"
+                    android:layout_marginStart="8dp"
+                    android:background="@drawable/bg_pill_selector"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center"
+                    android:nextFocusLeft="@+id/btnHaToggleHideDisabled"
+                    android:nextFocusUp="@+id/itemHaServerConnection">
+
+                    <ImageView
+                        android:id="@+id/ivHaRefreshIcon"
+                        android:layout_width="18dp"
+                        android:layout_height="18dp"
+                        android:src="@drawable/ic_refresh"
+                        app:tint="@color/accent_cyan" />
+                </LinearLayout>
             </LinearLayout>
 
-            <!-- Card 3: Capture Frame Rate -->
+            <!-- Dynamic Lights List Container -->
             <LinearLayout
-                android:id="@+id/itemFpsSetting"
+                android:id="@+id/layoutHaLightsContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/tvHaEmptyLights"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:layout_marginBottom="12dp"
+                    android:gravity="center"
+                    android:padding="16dp"
+                    android:text="No smart lights configured. Click the refresh button above to scan Home Assistant."
+                    android:textColor="@color/text_muted"
+                    android:textSize="13sp" />
+            </LinearLayout>
+
+            <!-- Preferences Section Header -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:layout_marginBottom="8dp"
+                android:letterSpacing="0.08"
+                android:text="PREFERENCES"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+
+            <!-- Card: Sync Rate -->
+            <LinearLayout
+                android:id="@+id/itemHaSyncRate"
                 style="@style/TvSettingItem"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -161,16 +224,16 @@
                     android:orientation="vertical">
 
                     <TextView
+                        style="@style/TvSettingTitle"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="@string/pref_fps"
-                        style="@style/TvSettingTitle" />
+                        android:text="Sync Rate" />
 
                     <TextView
+                        style="@style/TvSettingSub"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Frame sampling rate and processing performance"
-                        style="@style/TvSettingSub" />
+                        android:text="Smart light update throttling interval" />
                 </LinearLayout>
 
                 <ImageView
@@ -180,13 +243,13 @@
                     app:tint="@color/text_secondary" />
 
                 <TextView
-                    android:id="@+id/tvSystemFpsValue"
-                    android:layout_width="74dp"
+                    android:id="@+id/tvHaSyncRateValue"
+                    android:layout_width="160dp"
                     android:layout_height="wrap_content"
                     android:gravity="center"
-                    android:text="60 FPS"
+                    android:text="300 ms (Balanced)"
                     android:textColor="@color/accent_cyan"
-                    android:textSize="15sp"
+                    android:textSize="14sp"
                     android:textStyle="bold" />
 
                 <ImageView
@@ -196,67 +259,9 @@
                     app:tint="@color/text_secondary" />
             </LinearLayout>
 
-            <!-- Card 4: Capture Resolution -->
+            <!-- Card: Turn Off on Standby -->
             <LinearLayout
-                android:id="@+id/itemResolutionSetting"
-                style="@style/TvSettingItem"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
-
-                <ImageView
-                    android:layout_width="24dp"
-                    android:layout_height="24dp"
-                    android:src="@drawable/ic_settings"
-                    app:tint="@color/text_secondary" />
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="16dp"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/pref_resolution"
-                        style="@style/TvSettingTitle" />
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/pref_resolution_desc"
-                        style="@style/TvSettingSub" />
-                </LinearLayout>
-
-                <ImageView
-                    android:layout_width="20dp"
-                    android:layout_height="20dp"
-                    android:src="@drawable/ic_arrow_left"
-                    app:tint="@color/text_secondary" />
-
-                <TextView
-                    android:id="@+id/tvSystemResolutionValue"
-                    android:layout_width="120dp"
-                    android:layout_height="wrap_content"
-                    android:gravity="center"
-                    android:text="320x180 (Std)"
-                    android:textColor="@color/accent_cyan"
-                    android:textSize="15sp"
-                    android:textStyle="bold" />
-
-                <ImageView
-                    android:layout_width="20dp"
-                    android:layout_height="20dp"
-                    android:src="@drawable/ic_arrow_right"
-                    app:tint="@color/text_secondary" />
-            </LinearLayout>
-
-            <!-- Card 5: Auto-Start on Boot -->
-            <LinearLayout
-                android:id="@+id/itemAutoStartSetting"
+                android:id="@+id/itemHaTurnOffOnStop"
                 style="@style/TvSettingItem"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -277,20 +282,20 @@
                     android:orientation="vertical">
 
                     <TextView
+                        style="@style/TvSettingTitle"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="@string/pref_auto_start"
-                        style="@style/TvSettingTitle" />
+                        android:text="Turn Off on Standby" />
 
                     <TextView
+                        style="@style/TvSettingSub"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Start ambient capture automatically on TV boot"
-                        style="@style/TvSettingSub" />
+                        android:text="Turn off smart lights when TV sleeps or capture stops" />
                 </LinearLayout>
 
                 <TextView
-                    android:id="@+id/tvSystemAutoStartValue"
+                    android:id="@+id/tvHaTurnOffOnStopValue"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:background="@drawable/bg_pill_button"
@@ -298,28 +303,25 @@
                     android:paddingTop="5dp"
                     android:paddingEnd="14dp"
                     android:paddingBottom="5dp"
-                    android:text="Disabled"
-                    android:textColor="@color/text_secondary"
+                    android:text="Enabled"
+                    android:textColor="@color/accent_green"
                     android:textSize="13sp"
                     android:textStyle="bold" />
             </LinearLayout>
 
-            <!-- Card 6: Home Assistant Integration -->
+            <!-- Card: Dark Scene Cutoff -->
             <LinearLayout
-                android:id="@+id/itemHomeAssistantSetting"
+                android:id="@+id/itemHaDarkCutoff"
                 style="@style/TvSettingItem"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:descendantFocusability="afterDescendants"
-                android:focusable="false"
                 android:gravity="center_vertical"
                 android:orientation="horizontal">
 
                 <ImageView
-                    android:id="@+id/ivSystemHaIcon"
                     android:layout_width="24dp"
                     android:layout_height="24dp"
-                    android:src="@drawable/ic_bulb"
+                    android:src="@drawable/ic_crop"
                     app:tint="@color/text_secondary" />
 
                 <LinearLayout
@@ -330,77 +332,36 @@
                     android:orientation="vertical">
 
                     <TextView
+                        style="@style/TvSettingTitle"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="@string/pref_ha_title"
-                        style="@style/TvSettingTitle" />
+                        android:text="Dark Scene Cutoff" />
 
                     <TextView
+                        style="@style/TvSettingSub"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="@string/pref_ha_desc"
-                        style="@style/TvSettingSub" />
+                        android:text="Turn off or dim lights during completely black frames" />
                 </LinearLayout>
 
-                <!-- Sync Master Toggle -->
-                <LinearLayout
-                    android:id="@+id/btnSystemHaToggle"
+                <TextView
+                    android:id="@+id/tvHaDarkCutoffValue"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:background="@drawable/bg_pill_selector"
-                    android:clickable="true"
-                    android:focusable="true"
-                    android:gravity="center"
-                    android:nextFocusUp="@+id/itemAutoStartSetting"
-                    android:nextFocusDown="@+id/itemCheckUpdateSetting"
-                    android:nextFocusRight="@+id/btnSystemHaConfigure"
+                    android:background="@drawable/bg_pill_button"
                     android:paddingStart="14dp"
-                    android:paddingTop="6dp"
+                    android:paddingTop="5dp"
                     android:paddingEnd="14dp"
-                    android:paddingBottom="6dp">
-
-                    <TextView
-                        android:id="@+id/tvSystemHaToggle"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Disabled"
-                        android:textColor="@color/text_muted"
-                        android:textSize="13sp"
-                        android:textStyle="bold" />
-                </LinearLayout>
-
-                <!-- Configure Button -->
-                <LinearLayout
-                    android:id="@+id/btnSystemHaConfigure"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="10dp"
-                    android:background="@drawable/bg_pill_selector"
-                    android:clickable="true"
-                    android:focusable="true"
-                    android:gravity="center"
-                    android:nextFocusLeft="@+id/btnSystemHaToggle"
-                    android:nextFocusUp="@+id/itemAutoStartSetting"
-                    android:nextFocusDown="@+id/itemCheckUpdateSetting"
-                    android:paddingStart="14dp"
-                    android:paddingTop="6dp"
-                    android:paddingEnd="14dp"
-                    android:paddingBottom="6dp">
-
-                    <TextView
-                        android:id="@+id/tvSystemHaConfigure"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Configure"
-                        android:textColor="@color/accent_cyan"
-                        android:textSize="13sp"
-                        android:textStyle="bold" />
-                </LinearLayout>
+                    android:paddingBottom="5dp"
+                    android:text="Enabled"
+                    android:textColor="@color/accent_green"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
             </LinearLayout>
 
-            <!-- Card 7: Check for Updates -->
+            <!-- Card: Automation Control Guide -->
             <LinearLayout
-                android:id="@+id/itemCheckUpdateSetting"
+                android:id="@+id/itemHaAutomationGuide"
                 style="@style/TvSettingItem"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -421,24 +382,27 @@
                     android:orientation="vertical">
 
                     <TextView
+                        style="@style/TvSettingTitle"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Check for Updates"
-                        style="@style/TvSettingTitle" />
+                        android:text="Automation Control Guide" />
 
                     <TextView
-                        android:id="@+id/tvAppVersionSummary"
+                        style="@style/TvSettingSub"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Current Version: v1.0.0"
-                        style="@style/TvSettingSub" />
+                        android:text="Control ambient capture via Home Assistant automations &amp; ADB" />
                 </LinearLayout>
 
                 <TextView
-                    android:id="@+id/tvUpdateActionText"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Check Now"
+                    android:background="@drawable/bg_pill_button"
+                    android:paddingStart="14dp"
+                    android:paddingTop="5dp"
+                    android:paddingEnd="14dp"
+                    android:paddingBottom="5dp"
+                    android:text="View Guide"
                     android:textColor="@color/accent_cyan"
                     android:textSize="13sp"
                     android:textStyle="bold" />

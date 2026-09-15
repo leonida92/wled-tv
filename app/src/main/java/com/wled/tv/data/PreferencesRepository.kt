@@ -7,6 +7,10 @@ import com.wled.tv.model.ColorCalibration
 import com.wled.tv.model.Corner
 import com.wled.tv.model.DeviceType
 import com.wled.tv.model.Direction
+import com.wled.tv.model.HomeAssistantConfig
+import com.wled.tv.model.HomeAssistantLight
+import com.wled.tv.model.HomeAssistantZoneType
+import com.wled.tv.model.LightCapability
 import com.wled.tv.model.PerimeterConfig
 import com.wled.tv.model.WledConfig
 import com.wled.tv.model.WledDevice
@@ -48,10 +52,18 @@ class PreferencesRepository(context: Context) {
             listOf(loadLegacyPrimaryDevice(globalCalibration))
         }
 
+        val haJson = prefs.getString(KEY_HA_CONFIG_JSON, null)
+        val homeAssistant = if (!haJson.isNullOrBlank()) {
+            parseHaConfigJson(haJson)
+        } else {
+            HomeAssistantConfig()
+        }
+
         return WledConfig(
             devices = if (devices.isEmpty()) listOf(loadLegacyPrimaryDevice(globalCalibration)) else devices,
             calibration = globalCalibration,
-            autoStartOnBoot = autoStart
+            autoStartOnBoot = autoStart,
+            homeAssistant = homeAssistant
         )
     }
 
@@ -258,12 +270,104 @@ class PreferencesRepository(context: Context) {
             putInt(KEY_FPS, config.calibration.fps)
             putInt(KEY_CAPTURE_WIDTH, config.calibration.captureWidth)
             putInt(KEY_CAPTURE_HEIGHT, config.calibration.captureHeight)
+
+            val haJson = serializeHaConfig(config.homeAssistant)
+            putString(KEY_HA_CONFIG_JSON, haJson.toString())
             apply()
         }
     }
 
+    private fun parseHaConfigJson(jsonStr: String): HomeAssistantConfig {
+        return try {
+            val obj = JSONObject(jsonStr)
+            val lights = mutableListOf<HomeAssistantLight>()
+            val lightsArray = obj.optJSONArray("lights")
+            if (lightsArray != null) {
+                for (i in 0 until lightsArray.length()) {
+                    val lObj = lightsArray.getJSONObject(i)
+                    val capStr = lObj.optString("capability", LightCapability.COLOR_AND_BRIGHTNESS.name)
+                    val capability = try { LightCapability.valueOf(capStr) } catch (_: Exception) { LightCapability.COLOR_AND_BRIGHTNESS }
+                    val zoneStr = lObj.optString("zoneType", HomeAssistantZoneType.FULL_SCREEN_AVERAGE.name)
+                    val zoneType = try { HomeAssistantZoneType.valueOf(zoneStr) } catch (_: Exception) { HomeAssistantZoneType.FULL_SCREEN_AVERAGE }
+                    val rect = RectF(
+                        lObj.optDouble("rectL", 0.0).toFloat(),
+                        lObj.optDouble("rectT", 0.0).toFloat(),
+                        lObj.optDouble("rectR", 1.0).toFloat(),
+                        lObj.optDouble("rectB", 1.0).toFloat()
+                    )
+                    lights.add(
+                        HomeAssistantLight(
+                            entityId = lObj.optString("entityId"),
+                            name = lObj.optString("name"),
+                            capability = capability,
+                            enabled = lObj.optBoolean("enabled", true),
+                            zoneType = zoneType,
+                            customRect = rect,
+                            maxBrightness = lObj.optInt("maxBrightness", 255)
+                        )
+                    )
+                }
+            }
+
+            HomeAssistantConfig(
+                enabled = obj.optBoolean("enabled", false),
+                host = obj.optString("host", ""),
+                port = obj.optInt("port", 8123),
+                useSsl = obj.optBoolean("useSsl", false),
+                token = obj.optString("token", ""),
+                updateIntervalMs = obj.optLong("updateIntervalMs", 300L),
+                changeThreshold = obj.optInt("changeThreshold", 12),
+                transitionSeconds = obj.optDouble("transitionSeconds", 0.3).toFloat(),
+                darkCutoffEnabled = obj.optBoolean("darkCutoffEnabled", true),
+                darkThreshold = obj.optInt("darkThreshold", 10),
+                turnOffOnStop = obj.optBoolean("turnOffOnStop", true),
+                subscribeAutomations = obj.optBoolean("subscribeAutomations", true),
+                lights = lights
+            )
+        } catch (_: Exception) {
+            HomeAssistantConfig()
+        }
+    }
+
+    private fun serializeHaConfig(ha: HomeAssistantConfig): JSONObject {
+        val obj = JSONObject().apply {
+            put("enabled", ha.enabled)
+            put("host", ha.host)
+            put("port", ha.port)
+            put("useSsl", ha.useSsl)
+            put("token", ha.token)
+            put("updateIntervalMs", ha.updateIntervalMs)
+            put("changeThreshold", ha.changeThreshold)
+            put("transitionSeconds", ha.transitionSeconds.toDouble())
+            put("darkCutoffEnabled", ha.darkCutoffEnabled)
+            put("darkThreshold", ha.darkThreshold)
+            put("turnOffOnStop", ha.turnOffOnStop)
+            put("subscribeAutomations", ha.subscribeAutomations)
+
+            val array = JSONArray()
+            for (light in ha.lights) {
+                val lObj = JSONObject().apply {
+                    put("entityId", light.entityId)
+                    put("name", light.name)
+                    put("capability", light.capability.name)
+                    put("enabled", light.enabled)
+                    put("zoneType", light.zoneType.name)
+                    put("rectL", light.customRect.left.toDouble())
+                    put("rectT", light.customRect.top.toDouble())
+                    put("rectR", light.customRect.right.toDouble())
+                    put("rectB", light.customRect.bottom.toDouble())
+                    put("maxBrightness", light.maxBrightness)
+                }
+                array.put(lObj)
+            }
+            put("lights", array)
+        }
+        return obj
+    }
+
     companion object {
         private const val KEY_DEVICES_JSON = "wled_devices_json"
+        private const val KEY_HA_CONFIG_JSON = "ha_config_json"
 
         private const val KEY_IP = "wled_ip"
         private const val KEY_PORT = "wled_port"

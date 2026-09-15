@@ -65,4 +65,19 @@
     <string name="corner_top_right">Top-Right</string>
     <string name="dir_clockwise">Clockwise (CW)</string>
     <string name="dir_counter_clockwise">Counter-Clockwise (CCW)</string>
+
+    <!-- Home Assistant Integration -->
+    <string name="title_home_assistant">Home Assistant Integration</string>
+    <string name="pref_ha_title">Home Assistant</string>
+    <string name="pref_ha_desc">Sync smart lights and control via Home Assistant automations</string>
+    <string name="ha_master_toggle">Enable Home Assistant Sync</string>
+    <string name="ha_master_toggle_desc">Send ambient screen colors to selected Home Assistant lights</string>
+    <string name="ha_server_host">Home Assistant Host / IP</string>
+    <string name="ha_server_port">Port (Default 8123)</string>
+    <string name="ha_use_ssl">Use SSL (HTTPS / WSS)</string>
+    <string name="ha_token">Long-Lived Access Token</string>
+    <string name="ha_test_connection">Test Connection</string>
+    <string name="ha_fetch_lights">Discover Lights</string>
+    <string name="ha_lights_section">Configured Smart Lights</string>
+    <string name="ha_lights_empty">No lights configured. Enter server details and click Discover Lights.</string>
 </resources>

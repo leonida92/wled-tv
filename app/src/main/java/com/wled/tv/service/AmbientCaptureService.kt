@@ -34,8 +34,10 @@ import com.wled.tv.data.PreferencesRepository
 import com.wled.tv.model.DeviceType
 import com.wled.tv.model.WledConfig
 import com.wled.tv.model.WledDevice
+import com.wled.tv.network.HomeAssistantWebSocketClient
 import com.wled.tv.network.WledHttpClient
 import com.wled.tv.network.WledUdpSender
+import com.wled.tv.processing.HomeAssistantUpdateThrottler
 import com.wled.tv.processing.ScreenColorProcessor
 import com.wled.tv.ui.MainActivity
 import kotlinx.coroutines.CoroutineScope
@@ -63,6 +65,8 @@ class AmbientCaptureService : Service() {
     private val colorProcessor = ScreenColorProcessor()
     private val udpSender = WledUdpSender()
     private val httpClient = WledHttpClient()
+    private val haClient = HomeAssistantWebSocketClient()
+    private var haThrottler: HomeAssistantUpdateThrottler? = null
     private val serviceScope = CoroutineScope(Dispatchers.IO)
 
     private val deviceBuffers = HashMap<String, ByteArray>()
@@ -266,10 +270,54 @@ class AmbientCaptureService : Service() {
         config = prefsRepo.loadConfig()
         colorProcessor.reset()
         ensureWledAwake()
+        initHomeAssistant()
         if (isCapturing.get() && (config.calibration.captureWidth != oldWidth || config.calibration.captureHeight != oldHeight)) {
             reinitCaptureResolution(config.calibration.captureWidth, config.calibration.captureHeight)
         }
         Log.i(TAG, "Config reloaded: ${config.enabledDevices.size} enabled devices, Saturation=${config.calibration.saturation}, Resolution=${config.calibration.captureWidth}x${config.calibration.captureHeight}")
+    }
+
+    private fun initHomeAssistant() {
+        val haConfig = config.homeAssistant
+        if (haConfig.enabled && haConfig.isConfigured) {
+            if (haThrottler == null) {
+                haThrottler = HomeAssistantUpdateThrottler(haClient, serviceScope)
+            }
+            haThrottler?.start(haConfig)
+            haClient.connect(haConfig) { action ->
+                handleAutomationCommand(action)
+            }
+            Log.i(TAG, "Home Assistant integration initialized (${haConfig.enabledLights.size} lights)")
+        } else {
+            haThrottler?.stop()
+            haThrottler = null
+            haClient.disconnect()
+        }
+    }
+
+    private fun handleAutomationCommand(action: String) {
+        when (action.lowercase().trim()) {
+            "stop" -> {
+                Log.i(TAG, "Home Assistant requested capture stop")
+                backgroundHandler?.post {
+                    stopCapture()
+                    stopSelf()
+                }
+            }
+            "reload" -> {
+                Log.i(TAG, "Home Assistant requested config reload")
+                reloadConfig()
+            }
+            "toggle" -> {
+                Log.i(TAG, "Home Assistant requested toggle")
+                backgroundHandler?.post {
+                    if (isCapturing.get()) {
+                        stopCapture()
+                        stopSelf()
+                    }
+                }
+            }
+        }
     }
 
     private fun startCapture(resultCode: Int, resultData: Intent) {
@@ -288,6 +336,7 @@ class AmbientCaptureService : Service() {
 
         // Wake WLED controllers and set target brightness via HTTP
         ensureWledAwake()
+        initHomeAssistant()
 
         mediaProjection?.registerCallback(object : MediaProjection.Callback() {
             override fun onStop() {
@@ -403,6 +452,21 @@ class AmbientCaptureService : Service() {
                         liveFrameListener?.onDeviceFrameProcessed(device.id, buf, leds)
                     }
                 }
+
+                val haConfig = config.homeAssistant
+                if (haConfig.enabled && haConfig.enabledLights.isNotEmpty() && haThrottler != null) {
+                    val haColorMap = HashMap<String, IntArray>()
+                    for (light in haConfig.enabledLights) {
+                        val result = colorProcessor.processHaLight(image, light, config.calibration)
+                        if (result != null) {
+                            haColorMap[light.entityId] = result
+                        }
+                    }
+                    if (haColorMap.isNotEmpty()) {
+                        haThrottler?.postLightColors(haColorMap)
+                    }
+                }
+
                 lastSendTime = now
             } catch (e: Exception) {
                 Log.e(TAG, "Error processing frame", e)
@@ -465,6 +529,10 @@ class AmbientCaptureService : Service() {
 
     private fun blackoutAndPowerOffLeds() {
         serviceScope.launch(Dispatchers.IO) {
+            val haConfig = config.homeAssistant
+            if (haConfig.enabled && haConfig.turnOffOnStop) {
+                haThrottler?.turnOffAll(haConfig)
+            }
             for (device in config.enabledDevices) {
                 val leds = device.totalLeds
                 if (leds > 0) {
@@ -544,6 +612,9 @@ class AmbientCaptureService : Service() {
         }
 
         blackoutAndPowerOffLeds()
+        haThrottler?.stop()
+        haThrottler = null
+        haClient.disconnect()
         Log.i(TAG, "Ambient screen capture stopped")
     }
 
@@ -613,6 +684,9 @@ class AmbientCaptureService : Service() {
             wakeLock = null
         } catch (_: Exception) {}
         stopCapture()
+        haThrottler?.stop()
+        haThrottler = null
+        haClient.disconnect()
         try {
             udpSender.close()
         } catch (_: Exception) {}
