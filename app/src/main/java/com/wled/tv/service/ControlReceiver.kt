@@ -15,7 +15,15 @@ class ControlReceiver : BroadcastReceiver() {
         when (action) {
             ACTION_START -> {
                 if (AmbientCaptureService.isRunning) {
-                    Log.i(TAG, "Ambient capture is already running")
+                    if (AmbientCaptureService.isPaused) {
+                        Log.i(TAG, "Ambient capture is paused - resuming via START broadcast")
+                        val resumeIntent = Intent(context, AmbientCaptureService::class.java).apply {
+                            this.action = AmbientCaptureService.ACTION_RESUME
+                        }
+                        context.startService(resumeIntent)
+                    } else {
+                        Log.i(TAG, "Ambient capture is already running and active")
+                    }
                 } else {
                     Log.i(TAG, "Starting ambient capture via MainActivity")
                     val launchIntent = Intent(context, MainActivity::class.java).apply {
@@ -23,6 +31,28 @@ class ControlReceiver : BroadcastReceiver() {
                         putExtra(MainActivity.EXTRA_AUTO_START_TRIGGERED, true)
                     }
                     context.startActivity(launchIntent)
+                }
+            }
+            ACTION_PAUSE -> {
+                if (AmbientCaptureService.isRunning) {
+                    Log.i(TAG, "Pausing ambient capture service")
+                    val pauseIntent = Intent(context, AmbientCaptureService::class.java).apply {
+                        this.action = AmbientCaptureService.ACTION_PAUSE
+                    }
+                    context.startService(pauseIntent)
+                } else {
+                    Log.i(TAG, "Cannot pause: Ambient capture is not running")
+                }
+            }
+            ACTION_RESUME -> {
+                if (AmbientCaptureService.isRunning) {
+                    Log.i(TAG, "Resuming ambient capture service")
+                    val resumeIntent = Intent(context, AmbientCaptureService::class.java).apply {
+                        this.action = AmbientCaptureService.ACTION_RESUME
+                    }
+                    context.startService(resumeIntent)
+                } else {
+                    Log.i(TAG, "Cannot resume: Ambient capture is not running")
                 }
             }
             ACTION_STOP -> {
@@ -38,11 +68,10 @@ class ControlReceiver : BroadcastReceiver() {
             }
             ACTION_TOGGLE -> {
                 if (AmbientCaptureService.isRunning) {
-                    Log.i(TAG, "Toggling off: stopping ambient capture service")
-                    val stopIntent = Intent(context, AmbientCaptureService::class.java).apply {
-                        this.action = AmbientCaptureService.ACTION_STOP
+                    val toggleIntent = Intent(context, AmbientCaptureService::class.java).apply {
+                        this.action = AmbientCaptureService.ACTION_TOGGLE
                     }
-                    context.startService(stopIntent)
+                    context.startService(toggleIntent)
                 } else {
                     Log.i(TAG, "Toggling on: starting ambient capture via MainActivity")
                     val launchIntent = Intent(context, MainActivity::class.java).apply {
@@ -68,6 +97,8 @@ class ControlReceiver : BroadcastReceiver() {
         private const val TAG = "ControlReceiver"
         const val ACTION_START = "com.wled.tv.ACTION_START"
         const val ACTION_STOP = "com.wled.tv.ACTION_STOP"
+        const val ACTION_PAUSE = "com.wled.tv.ACTION_PAUSE"
+        const val ACTION_RESUME = "com.wled.tv.ACTION_RESUME"
         const val ACTION_TOGGLE = "com.wled.tv.ACTION_TOGGLE"
         const val ACTION_RELOAD_CONFIG = "com.wled.tv.ACTION_RELOAD_CONFIG"
     }

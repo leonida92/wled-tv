@@ -107,6 +107,8 @@
             <intent-filter>
                 <action android:name="com.wled.tv.ACTION_START" />
                 <action android:name="com.wled.tv.ACTION_STOP" />
+                <action android:name="com.wled.tv.ACTION_PAUSE" />
+                <action android:name="com.wled.tv.ACTION_RESUME" />
                 <action android:name="com.wled.tv.ACTION_TOGGLE" />
                 <action android:name="com.wled.tv.ACTION_RELOAD_CONFIG" />
             </intent-filter>

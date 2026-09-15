@@ -52,7 +52,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:fontFamily="monospace"
-            android:text="Start: am broadcast -a com.wled.tv.ACTION_START\nStop: am broadcast -a com.wled.tv.ACTION_STOP\nToggle: am broadcast -a com.wled.tv.ACTION_TOGGLE\nReload: am broadcast -a com.wled.tv.ACTION_RELOAD_CONFIG"
+            android:text="Start: am broadcast -a com.wled.tv.ACTION_START&#10;Pause: am broadcast -a com.wled.tv.ACTION_PAUSE&#10;Resume: am broadcast -a com.wled.tv.ACTION_RESUME&#10;Stop: am broadcast -a com.wled.tv.ACTION_STOP&#10;Toggle: am broadcast -a com.wled.tv.ACTION_TOGGLE&#10;Reload: am broadcast -a com.wled.tv.ACTION_RELOAD_CONFIG"
             android:textColor="@color/text_primary"
             android:textSize="11sp" />
     </LinearLayout>
@@ -87,7 +87,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:fontFamily="monospace"
-            android:text="Event: wled_tv_control\nData: { &quot;action&quot;: &quot;start&quot; }  (or &quot;stop&quot; / &quot;toggle&quot;)"
+            android:text="Event: wled_tv_control&#10;Data: { &quot;action&quot;: &quot;pause&quot; }  (or &quot;resume&quot; / &quot;start&quot; / &quot;toggle&quot; / &quot;stop&quot;)&#10;&#10;Note: &quot;pause&quot; turns off lights while keeping WebSocket connected so &quot;resume&quot; works without service relaunch."
             android:textColor="@color/text_primary"
             android:textSize="11sp" />
     </LinearLayout>

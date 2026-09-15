@@ -134,7 +134,11 @@ class MainActivity : AppCompatActivity(),
     private fun setupListeners() {
         btnPower.setOnClickListener {
             if (AmbientCaptureService.isRunning) {
-                stopAmbientService()
+                if (AmbientCaptureService.isPaused) {
+                    resumeAmbientService()
+                } else {
+                    stopAmbientService()
+                }
             } else {
                 requestScreenCapture()
             }
@@ -421,8 +425,19 @@ class MainActivity : AppCompatActivity(),
         updateUiState()
     }
 
+    private fun resumeAmbientService() {
+        AmbientCaptureService.isPaused = false
+        tvPreviewView.setLiveActive(true)
+        updateUiState()
+        val intent = Intent(this, AmbientCaptureService::class.java).apply {
+            action = AmbientCaptureService.ACTION_RESUME
+        }
+        startService(intent)
+    }
+
     private fun stopAmbientService() {
         AmbientCaptureService.isRunning = false
+        AmbientCaptureService.isPaused = false
         AmbientCaptureService.liveFrameListener = null
         tvPreviewView.setLiveActive(false)
         tvPreviewView.clearLiveColors()
@@ -435,23 +450,34 @@ class MainActivity : AppCompatActivity(),
 
     private fun updateUiState() {
         val running = AmbientCaptureService.isRunning
+        val isPaused = AmbientCaptureService.isPaused
         val pingableActiveCount = config.enabledDevices.count { dev ->
             deviceReachabilityMap[dev.id] == true
         }
         val totalEnabled = config.enabledDevices.size
 
         if (running) {
-            btnPower.setBackgroundResource(R.drawable.bg_power_button_on)
-            tvPowerText.text = getString(R.string.btn_stop_mirror)
-            tvPowerText.setTextColor(Color.parseColor("#F87171"))
-            ivPowerIcon.imageTintList = ColorStateList.valueOf(Color.parseColor("#EF4444"))
+            if (isPaused) {
+                btnPower.setBackgroundResource(R.drawable.bg_power_button_off)
+                tvPowerText.text = "Resume Lights"
+                tvPowerText.setTextColor(Color.parseColor("#FBBF24"))
+                ivPowerIcon.imageTintList = ColorStateList.valueOf(Color.parseColor("#F59E0B"))
 
-            if (pingableActiveCount > 0) {
-                viewStatusDot.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#00E676"))
-                tvStatusTitle.text = if (pingableActiveCount == 1) "Active" else "Active ($pingableActiveCount)"
+                viewStatusDot.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#F59E0B"))
+                tvStatusTitle.text = "Paused"
             } else {
-                viewStatusDot.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#EF4444"))
-                tvStatusTitle.text = "No Light Found"
+                btnPower.setBackgroundResource(R.drawable.bg_power_button_on)
+                tvPowerText.text = getString(R.string.btn_stop_mirror)
+                tvPowerText.setTextColor(Color.parseColor("#F87171"))
+                ivPowerIcon.imageTintList = ColorStateList.valueOf(Color.parseColor("#EF4444"))
+
+                if (pingableActiveCount > 0) {
+                    viewStatusDot.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#00E676"))
+                    tvStatusTitle.text = if (pingableActiveCount == 1) "Active" else "Active ($pingableActiveCount)"
+                } else {
+                    viewStatusDot.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#EF4444"))
+                    tvStatusTitle.text = "No Light Found"
+                }
             }
         } else {
             btnPower.setBackgroundResource(R.drawable.bg_power_button_off)
@@ -513,9 +539,9 @@ class MainActivity : AppCompatActivity(),
 
     override fun onStateChanged(running: Boolean) {
         runOnUiThread {
-            tvPreviewView.setLiveActive(running)
-            if (!running) {
-                AmbientCaptureService.liveFrameListener = null
+            val paused = AmbientCaptureService.isPaused
+            tvPreviewView.setLiveActive(running && !paused)
+            if (!running || paused) {
                 tvPreviewView.clearLiveColors()
             }
             updateUiState()

@@ -74,6 +74,7 @@ class AmbientCaptureService : Service() {
     private val deviceBuffers = HashMap<String, ByteArray>()
     private var isCapturing = AtomicBoolean(false)
     private var isScreenOff = AtomicBoolean(false)
+    private var isPaused = AtomicBoolean(false)
     private var lastFrameTime = 0L
     private var lastSendTime = 0L
     private var lastHaSampleTime = 0L
@@ -85,6 +86,11 @@ class AmbientCaptureService : Service() {
     private val keepaliveRunnable = object : Runnable {
         override fun run() {
             if (!isCapturing.get()) return
+
+            if (isPaused.get()) {
+                backgroundHandler?.postDelayed(this, 1000L)
+                return
+            }
 
             if (isScreenOff.get() || powerManager?.isInteractive == false) {
                 if (!isScreenOff.get()) {
@@ -234,6 +240,25 @@ class AmbientCaptureService : Service() {
                 reloadConfig()
                 return START_STICKY
             }
+            ACTION_PAUSE -> {
+                Log.i(TAG, "Pause command received via intent")
+                pauseCapture()
+                return START_STICKY
+            }
+            ACTION_RESUME -> {
+                Log.i(TAG, "Resume command received via intent")
+                resumeCapture()
+                return START_STICKY
+            }
+            ACTION_TOGGLE -> {
+                Log.i(TAG, "Toggle command received via intent")
+                if (isPaused.get()) {
+                    resumeCapture()
+                } else {
+                    pauseCapture()
+                }
+                return START_STICKY
+            }
         }
 
         val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, 0) ?: 0
@@ -304,6 +329,26 @@ class AmbientCaptureService : Service() {
 
     private fun handleAutomationCommand(action: String) {
         when (action.lowercase().trim()) {
+            "pause" -> {
+                Log.i(TAG, "Home Assistant requested pause")
+                backgroundHandler?.post {
+                    pauseCapture()
+                }
+            }
+            "resume" -> {
+                Log.i(TAG, "Home Assistant requested resume")
+                backgroundHandler?.post {
+                    resumeCapture()
+                }
+            }
+            "start" -> {
+                Log.i(TAG, "Home Assistant requested start")
+                backgroundHandler?.post {
+                    if (isPaused.get()) {
+                        resumeCapture()
+                    }
+                }
+            }
             "stop" -> {
                 Log.i(TAG, "Home Assistant requested capture stop")
                 backgroundHandler?.post {
@@ -319,8 +364,11 @@ class AmbientCaptureService : Service() {
                 Log.i(TAG, "Home Assistant requested toggle")
                 backgroundHandler?.post {
                     if (isCapturing.get()) {
-                        stopCapture()
-                        stopSelf()
+                        if (isPaused.get()) {
+                            resumeCapture()
+                        } else {
+                            pauseCapture()
+                        }
                     }
                 }
             }
@@ -338,6 +386,8 @@ class AmbientCaptureService : Service() {
         }
 
         isCapturing.set(true)
+        isPaused.set(false)
+        Companion.isPaused = false
         isRunning = true
         stateListener?.onStateChanged(true)
 
@@ -407,7 +457,7 @@ class AmbientCaptureService : Service() {
         reader.setOnImageAvailableListener({ r ->
             val image = r.acquireLatestImage() ?: return@setOnImageAvailableListener
 
-            if (!isCapturing.get()) {
+            if (!isCapturing.get() || isPaused.get()) {
                 image.close()
                 return@setOnImageAvailableListener
             }
@@ -534,6 +584,10 @@ class AmbientCaptureService : Service() {
     }
 
     private fun handleScreenOn() {
+        if (isPaused.get()) {
+            Log.i(TAG, "Screen wake / active detected, but capture is paused - keeping lights off")
+            return
+        }
         if (isScreenOff.compareAndSet(true, false)) {
             Log.i(TAG, "Screen wake / active detected - resuming ambient lighting")
             ensureWledAwake()
@@ -550,7 +604,7 @@ class AmbientCaptureService : Service() {
             withContext(NonCancellable) {
                 try {
                     val haConfig = config.homeAssistant
-                    if (haConfig.enabled && haConfig.turnOffOnStop) {
+                    if (haConfig.enabled && (haConfig.turnOffOnStop || isPaused.get())) {
                         haThrottler?.turnOffAll(haConfig)
                     }
                     for (device in config.enabledDevices) {
@@ -596,9 +650,38 @@ class AmbientCaptureService : Service() {
         }
     }
 
+    fun pauseCapture() {
+        if (!isCapturing.get()) return
+        if (isPaused.compareAndSet(false, true)) {
+            Log.i(TAG, "Ambient capture paused - turning off active lights and holding WebSocket")
+            Companion.isPaused = true
+            blackoutAndPowerOffLeds()
+            updateNotification()
+            stateListener?.onStateChanged(true)
+        }
+    }
+
+    fun resumeCapture() {
+        if (!isCapturing.get()) return
+        if (isPaused.compareAndSet(true, false)) {
+            Log.i(TAG, "Ambient capture resumed - waking lights and resuming stream")
+            Companion.isPaused = false
+            ensureWledAwake()
+            lastSendTime = 0L
+            lastFrameTime = 0L
+            lastHaSampleTime = 0L
+            backgroundHandler?.removeCallbacks(keepaliveRunnable)
+            backgroundHandler?.post(keepaliveRunnable)
+            updateNotification()
+            stateListener?.onStateChanged(true)
+        }
+    }
+
     private fun stopCapture() {
         if (!isCapturing.getAndSet(false)) return
 
+        isPaused.set(false)
+        Companion.isPaused = false
         isRunning = false
         stateListener?.onStateChanged(false)
 
@@ -664,15 +747,42 @@ class AmbientCaptureService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("WLED TV Ambient Active")
-            .setContentText("Streaming ambient bias lighting to ${config.enabledDevices.size} lights")
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_tv)
             .setContentIntent(pendingIntent)
-            .addAction(R.drawable.ic_power, "Stop", stopPendingIntent)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .build()
+
+        if (isPaused.get()) {
+            val resumeIntent = Intent(this, AmbientCaptureService::class.java).apply {
+                action = ACTION_RESUME
+            }
+            val resumePendingIntent = PendingIntent.getService(
+                this,
+                1,
+                resumeIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            builder.setContentTitle("WLED TV Ambient Paused")
+                .setContentText("Lights standby (Listening to Home Assistant)")
+                .addAction(R.drawable.ic_speed, "Resume", resumePendingIntent)
+                .addAction(R.drawable.ic_power, "Stop", stopPendingIntent)
+        } else {
+            builder.setContentTitle("WLED TV Ambient Active")
+                .setContentText("Streaming ambient bias lighting to ${config.enabledDevices.size} lights")
+                .addAction(R.drawable.ic_power, "Stop", stopPendingIntent)
+        }
+
+        return builder.build()
+    }
+
+    private fun updateNotification() {
+        try {
+            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.notify(NOTIFICATION_ID, createNotification())
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to update notification", e)
+        }
     }
 
     private fun createNotificationChannel() {
@@ -740,12 +850,18 @@ class AmbientCaptureService : Service() {
         const val NOTIFICATION_ID = 1001
 
         const val ACTION_STOP = "com.wled.tv.ACTION_STOP"
+        const val ACTION_PAUSE = "com.wled.tv.ACTION_PAUSE"
+        const val ACTION_RESUME = "com.wled.tv.ACTION_RESUME"
+        const val ACTION_TOGGLE = "com.wled.tv.ACTION_TOGGLE"
         const val ACTION_RELOAD_CONFIG = "com.wled.tv.ACTION_RELOAD_CONFIG"
         const val EXTRA_RESULT_CODE = "extra_result_code"
         const val EXTRA_RESULT_DATA = "extra_result_data"
 
         @Volatile
         var isRunning: Boolean = false
+
+        @Volatile
+        var isPaused: Boolean = false
 
         @Volatile
         var isTestingOverride: Boolean = false
