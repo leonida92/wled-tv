@@ -4,6 +4,7 @@ import android.app.AlertDialog
 import android.graphics.Color
 import android.graphics.RectF
 import android.os.Bundle
+import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.View
 import android.widget.Button
@@ -22,8 +23,10 @@ import com.wled.tv.model.HomeAssistantZoneType
 import com.wled.tv.model.LightCapability
 import com.wled.tv.network.HomeAssistantWebSocketClient
 import com.wled.tv.service.AmbientCaptureService
+import com.wled.tv.ui.views.HaActiveEdge
 import com.wled.tv.ui.views.HaZonePreviewView
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 class HomeAssistantSettingsActivity : AppCompatActivity() {
 
@@ -515,6 +518,21 @@ class HomeAssistantSettingsActivity : AppCompatActivity() {
         val btnDialogSelectZone = dialogView.findViewById<LinearLayout>(R.id.btnDialogSelectZone)
         val tvDialogZoneValue = dialogView.findViewById<TextView>(R.id.tvDialogLightZoneValue)
 
+        val layoutCustomBoxControls = dialogView.findViewById<LinearLayout>(R.id.layoutCustomBoxControls)
+        val tvCustomBoxInstruction = dialogView.findViewById<TextView>(R.id.tvCustomBoxInstruction)
+        val btnPresetCenter50 = dialogView.findViewById<TextView>(R.id.btnPresetCenter50)
+        val btnPresetTopHalf = dialogView.findViewById<TextView>(R.id.btnPresetTopHalf)
+        val btnPresetBottomHalf = dialogView.findViewById<TextView>(R.id.btnPresetBottomHalf)
+        val btnPresetFull = dialogView.findViewById<TextView>(R.id.btnPresetFull)
+        val itemBoxLeft = dialogView.findViewById<LinearLayout>(R.id.itemBoxLeft)
+        val tvBoxLeftValue = dialogView.findViewById<TextView>(R.id.tvBoxLeftValue)
+        val itemBoxRight = dialogView.findViewById<LinearLayout>(R.id.itemBoxRight)
+        val tvBoxRightValue = dialogView.findViewById<TextView>(R.id.tvBoxRightValue)
+        val itemBoxTop = dialogView.findViewById<LinearLayout>(R.id.itemBoxTop)
+        val tvBoxTopValue = dialogView.findViewById<TextView>(R.id.tvBoxTopValue)
+        val itemBoxBottom = dialogView.findViewById<LinearLayout>(R.id.itemBoxBottom)
+        val tvBoxBottomValue = dialogView.findViewById<TextView>(R.id.tvBoxBottomValue)
+
         val btnDialogSelectBri = dialogView.findViewById<LinearLayout>(R.id.btnDialogSelectBri)
         val tvDialogBriValue = dialogView.findViewById<TextView>(R.id.tvDialogLightBriValue)
 
@@ -538,17 +556,186 @@ class HomeAssistantSettingsActivity : AppCompatActivity() {
             }
         }
 
+        var activeEdge = HaActiveEdge.NONE
+
+        fun updateEdgeCardsUi() {
+            val isCustom = currentLight.zoneType == HomeAssistantZoneType.CUSTOM_RECT
+            layoutCustomBoxControls.visibility = if (isCustom) View.VISIBLE else View.GONE
+            if (isCustom) {
+                val leftPct = (currentLight.customRect.left * 100).roundToInt()
+                val rightPct = (currentLight.customRect.right * 100).roundToInt()
+                val topPct = (currentLight.customRect.top * 100).roundToInt()
+                val bottomPct = (currentLight.customRect.bottom * 100).roundToInt()
+
+                val isLeftActive = (activeEdge == HaActiveEdge.LEFT)
+                val isRightActive = (activeEdge == HaActiveEdge.RIGHT)
+                val isTopActive = (activeEdge == HaActiveEdge.TOP)
+                val isBottomActive = (activeEdge == HaActiveEdge.BOTTOM)
+
+                tvBoxLeftValue.text = if (isLeftActive) "< $leftPct% >" else "$leftPct%"
+                tvBoxLeftValue.setBackgroundResource(if (isLeftActive) R.drawable.bg_pill_button_focused else R.drawable.bg_pill_button)
+
+                tvBoxRightValue.text = if (isRightActive) "< $rightPct% >" else "$rightPct%"
+                tvBoxRightValue.setBackgroundResource(if (isRightActive) R.drawable.bg_pill_button_focused else R.drawable.bg_pill_button)
+
+                tvBoxTopValue.text = if (isTopActive) "< $topPct% >" else "$topPct%"
+                tvBoxTopValue.setBackgroundResource(if (isTopActive) R.drawable.bg_pill_button_focused else R.drawable.bg_pill_button)
+
+                tvBoxBottomValue.text = if (isBottomActive) "< $bottomPct% >" else "$bottomPct%"
+                tvBoxBottomValue.setBackgroundResource(if (isBottomActive) R.drawable.bg_pill_button_focused else R.drawable.bg_pill_button)
+
+                haZonePreview.setActiveEdge(activeEdge)
+
+                tvCustomBoxInstruction?.text = when (activeEdge) {
+                    HaActiveEdge.LEFT -> "Editing Left Edge: Press Left/Right to adjust, OK to confirm"
+                    HaActiveEdge.TOP -> "Editing Top Edge: Press Left/Right to adjust, OK to confirm"
+                    HaActiveEdge.RIGHT -> "Editing Right Edge: Press Left/Right to adjust, OK to confirm"
+                    HaActiveEdge.BOTTOM -> "Editing Bottom Edge: Press Left/Right to adjust, OK to confirm"
+                    HaActiveEdge.NONE -> "Click an edge to adjust with Left / Right"
+                }
+                tvCustomBoxInstruction?.setTextColor(
+                    if (activeEdge != HaActiveEdge.NONE) Color.parseColor("#38BDF8")
+                    else Color.parseColor("#94A3B8")
+                )
+            } else {
+                activeEdge = HaActiveEdge.NONE
+                haZonePreview.setActiveEdge(HaActiveEdge.NONE)
+            }
+        }
+
         fun refreshDialogFields() {
             tvDialogZoneValue.text = currentLight.zoneType.displayName
             val pct = (currentLight.maxBrightness * 100) / 255
             tvDialogBriValue.text = "$pct%"
             haZonePreview.setZone(currentLight.zoneType, currentLight.customRect)
+            updateEdgeCardsUi()
         }
         refreshDialogFields()
 
         fun persistAndNotify() {
             lightsList[lightIndex] = currentLight
             saveConfig()
+        }
+
+        fun adjustLeft(delta: Float) {
+            val cur = currentLight.customRect
+            val newLeft = ((cur.left + delta) * 20f).roundToInt() / 20f
+            val clamped = newLeft.coerceIn(0f, cur.right - 0.05f)
+            val updated = RectF(clamped, cur.top, cur.right, cur.bottom)
+            currentLight = currentLight.copy(customRect = updated)
+            persistAndNotify()
+            refreshDialogFields()
+        }
+
+        fun adjustRight(delta: Float) {
+            val cur = currentLight.customRect
+            val newRight = ((cur.right + delta) * 20f).roundToInt() / 20f
+            val clamped = newRight.coerceIn(cur.left + 0.05f, 1.0f)
+            val updated = RectF(cur.left, cur.top, clamped, cur.bottom)
+            currentLight = currentLight.copy(customRect = updated)
+            persistAndNotify()
+            refreshDialogFields()
+        }
+
+        fun adjustTop(delta: Float) {
+            val cur = currentLight.customRect
+            val newTop = ((cur.top + delta) * 20f).roundToInt() / 20f
+            val clamped = newTop.coerceIn(0f, cur.bottom - 0.05f)
+            val updated = RectF(cur.left, clamped, cur.right, cur.bottom)
+            currentLight = currentLight.copy(customRect = updated)
+            persistAndNotify()
+            refreshDialogFields()
+        }
+
+        fun adjustBottom(delta: Float) {
+            val cur = currentLight.customRect
+            val newBottom = ((cur.bottom + delta) * 20f).roundToInt() / 20f
+            val clamped = newBottom.coerceIn(cur.top + 0.05f, 1.0f)
+            val updated = RectF(cur.left, cur.top, cur.right, clamped)
+            currentLight = currentLight.copy(customRect = updated)
+            persistAndNotify()
+            refreshDialogFields()
+        }
+
+        fun setupEdgeCard(card: View, targetEdge: HaActiveEdge, onAdjust: (Float) -> Unit) {
+            card.setOnFocusChangeListener { _, hasFocus ->
+                if (!hasFocus && activeEdge == targetEdge) {
+                    activeEdge = HaActiveEdge.NONE
+                    updateEdgeCardsUi()
+                }
+            }
+            card.setOnClickListener {
+                activeEdge = if (activeEdge == targetEdge) HaActiveEdge.NONE else targetEdge
+                updateEdgeCardsUi()
+            }
+            card.setOnKeyListener { _, keyCode, event ->
+                if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER || keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER) {
+                    if (event.action == KeyEvent.ACTION_DOWN) {
+                        activeEdge = if (activeEdge == targetEdge) HaActiveEdge.NONE else targetEdge
+                        updateEdgeCardsUi()
+                    }
+                    return@setOnKeyListener true
+                }
+                if (activeEdge == targetEdge) {
+                    if (event.action == KeyEvent.ACTION_DOWN) {
+                        when (keyCode) {
+                            KeyEvent.KEYCODE_DPAD_LEFT -> {
+                                onAdjust(-0.05f)
+                                return@setOnKeyListener true
+                            }
+                            KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                                onAdjust(0.05f)
+                                return@setOnKeyListener true
+                            }
+                            KeyEvent.KEYCODE_BACK -> {
+                                activeEdge = HaActiveEdge.NONE
+                                updateEdgeCardsUi()
+                                return@setOnKeyListener true
+                            }
+                            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> {
+                                activeEdge = HaActiveEdge.NONE
+                                updateEdgeCardsUi()
+                                return@setOnKeyListener false
+                            }
+                        }
+                    } else if (event.action == KeyEvent.ACTION_UP) {
+                        if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT || keyCode == KeyEvent.KEYCODE_BACK) {
+                            return@setOnKeyListener true
+                        }
+                    }
+                }
+                false
+            }
+        }
+
+        setupEdgeCard(itemBoxLeft, HaActiveEdge.LEFT) { adjustLeft(it) }
+        setupEdgeCard(itemBoxTop, HaActiveEdge.TOP) { adjustTop(it) }
+        setupEdgeCard(itemBoxRight, HaActiveEdge.RIGHT) { adjustRight(it) }
+        setupEdgeCard(itemBoxBottom, HaActiveEdge.BOTTOM) { adjustBottom(it) }
+
+        btnPresetCenter50.setOnClickListener {
+            activeEdge = HaActiveEdge.NONE
+            currentLight = currentLight.copy(customRect = RectF(0.25f, 0.25f, 0.75f, 0.75f))
+            persistAndNotify()
+            refreshDialogFields()
+        }
+        btnPresetTopHalf.setOnClickListener {
+            activeEdge = HaActiveEdge.NONE
+            currentLight = currentLight.copy(customRect = RectF(0.0f, 0.0f, 1.0f, 0.5f))
+            persistAndNotify()
+            refreshDialogFields()
+        }
+        btnPresetBottomHalf.setOnClickListener {
+            activeEdge = HaActiveEdge.NONE
+            currentLight = currentLight.copy(customRect = RectF(0.0f, 0.5f, 1.0f, 1.0f))
+            persistAndNotify()
+            refreshDialogFields()
+        }
+        btnPresetFull.setOnClickListener {
+            activeEdge = HaActiveEdge.NONE
+            currentLight = currentLight.copy(customRect = RectF(0.0f, 0.0f, 1.0f, 1.0f))
+            persistAndNotify()
+            refreshDialogFields()
         }
 
         btnDialogSelectZone.setOnClickListener {
@@ -560,21 +747,13 @@ class HomeAssistantSettingsActivity : AppCompatActivity() {
                 .setTitle("Select Sampling Zone")
                 .setSingleChoiceItems(zoneNames, currentIndex) { zoneDialog, which ->
                     val selectedZone = zones[which]
+                    activeEdge = HaActiveEdge.NONE
+                    currentLight = currentLight.copy(zoneType = selectedZone)
+                    persistAndNotify()
+                    refreshDialogFields()
+                    zoneDialog.dismiss()
                     if (selectedZone == HomeAssistantZoneType.CUSTOM_RECT) {
-                        zoneDialog.dismiss()
-                        showCustomBoxDialog(currentLight) { updatedRect ->
-                            currentLight = currentLight.copy(
-                                zoneType = HomeAssistantZoneType.CUSTOM_RECT,
-                                customRect = updatedRect
-                            )
-                            persistAndNotify()
-                            refreshDialogFields()
-                        }
-                    } else {
-                        currentLight = currentLight.copy(zoneType = selectedZone)
-                        persistAndNotify()
-                        refreshDialogFields()
-                        zoneDialog.dismiss()
+                        itemBoxLeft.requestFocus()
                     }
                 }
                 .setNegativeButton("Cancel", null)
@@ -608,43 +787,6 @@ class HomeAssistantSettingsActivity : AppCompatActivity() {
 
         parentDialog.show()
         btnDialogSelectZone.requestFocus()
-    }
-
-    private fun showCustomBoxDialog(
-        currentLight: HomeAssistantLight,
-        onApplied: (RectF) -> Unit
-    ) {
-        val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_ha_custom_box, null)
-
-        val etLeft = dialogView.findViewById<EditText>(R.id.etBoxLeft)
-        val etTop = dialogView.findViewById<EditText>(R.id.etBoxTop)
-        val etRight = dialogView.findViewById<EditText>(R.id.etBoxRight)
-        val etBottom = dialogView.findViewById<EditText>(R.id.etBoxBottom)
-
-        etLeft.setText((currentLight.customRect.left * 100).toInt().toString())
-        etTop.setText((currentLight.customRect.top * 100).toInt().toString())
-        etRight.setText((currentLight.customRect.right * 100).toInt().toString())
-        etBottom.setText((currentLight.customRect.bottom * 100).toInt().toString())
-
-        AlertDialog.Builder(this)
-            .setView(dialogView)
-            .setPositiveButton("Apply") { _, _ ->
-                val l = (etLeft.text.toString().toFloatOrNull() ?: 0f) / 100f
-                val t = (etTop.text.toString().toFloatOrNull() ?: 0f) / 100f
-                val r = (etRight.text.toString().toFloatOrNull() ?: 100f) / 100f
-                val b = (etBottom.text.toString().toFloatOrNull() ?: 100f) / 100f
-
-                val newRect = RectF(
-                    l.coerceIn(0f, 1f),
-                    t.coerceIn(0f, 1f),
-                    r.coerceIn(0.01f, 1f),
-                    b.coerceIn(0.01f, 1f)
-                )
-
-                onApplied(newRect)
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
     }
 
     private fun showAutomationGuideDialog() {

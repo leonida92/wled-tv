@@ -10,6 +10,14 @@ import android.util.AttributeSet
 import android.view.View
 import com.wled.tv.model.HomeAssistantZoneType
 
+enum class HaActiveEdge {
+    NONE,
+    LEFT,
+    TOP,
+    RIGHT,
+    BOTTOM
+}
+
 class HaZonePreviewView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
@@ -18,6 +26,7 @@ class HaZonePreviewView @JvmOverloads constructor(
 
     private var zoneType: HomeAssistantZoneType = HomeAssistantZoneType.FULL_SCREEN_AVERAGE
     private var customRect: RectF = RectF(0f, 0f, 1f, 1f)
+    private var activeEdge: HaActiveEdge = HaActiveEdge.NONE
 
     private val tvBezelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#334155")
@@ -48,6 +57,17 @@ class HaZonePreviewView @JvmOverloads constructor(
         strokeWidth = 4f
     }
 
+    private val activeEdgeHighlightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#38BDF8") // Bright Sky Cyan
+        style = Paint.Style.STROKE
+        strokeWidth = 6f
+    }
+
+    private val cornerHandlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#00E5FF")
+        style = Paint.Style.FILL
+    }
+
     private val badgeBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#E60F172A") // 90% slate-900
         style = Paint.Style.FILL
@@ -69,6 +89,19 @@ class HaZonePreviewView @JvmOverloads constructor(
     fun setZone(zone: HomeAssistantZoneType, custom: RectF = RectF(0f, 0f, 1f, 1f)) {
         this.zoneType = zone
         this.customRect = custom
+        if (zone != HomeAssistantZoneType.CUSTOM_RECT) {
+            this.activeEdge = HaActiveEdge.NONE
+        }
+        invalidate()
+    }
+
+    fun setActiveEdge(edge: HaActiveEdge) {
+        this.activeEdge = edge
+        invalidate()
+    }
+
+    fun updateCustomRect(rect: RectF) {
+        this.customRect = rect
         invalidate()
     }
 
@@ -134,6 +167,24 @@ class HaZonePreviewView @JvmOverloads constructor(
         // 4. Fill and stroke active sampling zone
         canvas.drawRoundRect(zRect, 4f, 4f, zoneFillPaint)
         canvas.drawRoundRect(zRect, 4f, 4f, zoneStrokePaint)
+
+        if (zoneType == HomeAssistantZoneType.CUSTOM_RECT) {
+            val handleRadius = 5f
+            canvas.drawCircle(zRect.left, zRect.top, handleRadius, cornerHandlePaint)
+            canvas.drawCircle(zRect.right, zRect.top, handleRadius, cornerHandlePaint)
+            canvas.drawCircle(zRect.right, zRect.bottom, handleRadius, cornerHandlePaint)
+            canvas.drawCircle(zRect.left, zRect.bottom, handleRadius, cornerHandlePaint)
+
+            if (activeEdge != HaActiveEdge.NONE) {
+                when (activeEdge) {
+                    HaActiveEdge.LEFT -> canvas.drawLine(zRect.left, zRect.top, zRect.left, zRect.bottom, activeEdgeHighlightPaint)
+                    HaActiveEdge.RIGHT -> canvas.drawLine(zRect.right, zRect.top, zRect.right, zRect.bottom, activeEdgeHighlightPaint)
+                    HaActiveEdge.TOP -> canvas.drawLine(zRect.left, zRect.top, zRect.right, zRect.top, activeEdgeHighlightPaint)
+                    HaActiveEdge.BOTTOM -> canvas.drawLine(zRect.left, zRect.bottom, zRect.right, zRect.bottom, activeEdgeHighlightPaint)
+                    HaActiveEdge.NONE -> { }
+                }
+            }
+        }
 
         // 5. Draw label centered on the TV screen inside a stylish badge (never clips at edges)
         val label = when (zoneType) {

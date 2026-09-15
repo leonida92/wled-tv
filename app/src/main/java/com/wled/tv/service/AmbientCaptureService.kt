@@ -42,9 +42,11 @@ import com.wled.tv.processing.ScreenColorProcessor
 import com.wled.tv.ui.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
 
 class AmbientCaptureService : Service() {
@@ -75,6 +77,8 @@ class AmbientCaptureService : Service() {
     private var lastFrameTime = 0L
     private var lastSendTime = 0L
     private var lastHaSampleTime = 0L
+    private var lastLivePreviewTime = 0L
+    private val haLightBuffers = HashMap<String, IntArray>()
     private var captureWidth = 320
     private var captureHeight = 180
 
@@ -270,6 +274,7 @@ class AmbientCaptureService : Service() {
         val oldHeight = captureHeight
         config = prefsRepo.loadConfig()
         colorProcessor.reset()
+        haLightBuffers.clear()
         lastHaSampleTime = 0L
         ensureWledAwake()
         initHomeAssistant()
@@ -454,7 +459,11 @@ class AmbientCaptureService : Service() {
                             colorOrder = device.calibration.colorOrder
                         )
 
-                        liveFrameListener?.onDeviceFrameProcessed(device.id, buf, leds)
+                        if (liveFrameListener != null && (now - lastLivePreviewTime >= 50L)) {
+                            lastLivePreviewTime = now
+                            val previewCopy = buf.copyOf(leds * 3)
+                            liveFrameListener?.onDeviceFrameProcessed(device.id, previewCopy, leds)
+                        }
                     }
                 }
 
@@ -464,9 +473,9 @@ class AmbientCaptureService : Service() {
                         lastHaSampleTime = now
                         val haColorMap = HashMap<String, IntArray>()
                         for (light in haConfig.enabledLights) {
-                            val result = colorProcessor.processHaLight(image, light, config.calibration)
-                            if (result != null) {
-                                haColorMap[light.entityId] = result
+                            val sampleBuf = haLightBuffers.getOrPut(light.entityId) { IntArray(4) }
+                            if (colorProcessor.processHaLight(image, light, config.calibration, sampleBuf)) {
+                                haColorMap[light.entityId] = sampleBuf
                             }
                         }
                         if (haColorMap.isNotEmpty()) {
@@ -537,32 +546,38 @@ class AmbientCaptureService : Service() {
     }
 
     private fun blackoutAndPowerOffLeds() {
-        serviceScope.launch(Dispatchers.IO) {
-            val haConfig = config.homeAssistant
-            if (haConfig.enabled && haConfig.turnOffOnStop) {
-                haThrottler?.turnOffAll(haConfig)
-            }
-            for (device in config.enabledDevices) {
-                val leds = device.totalLeds
-                if (leds > 0) {
-                    val blackFrame = ByteArray(leds * 3)
-                    // Send blackout frames to immediately turn off LEDs before HTTP takes effect
-                    for (i in 0..2) {
-                        udpSender.sendDrgbFrame(
-                            ip = device.ip,
-                            port = device.port,
-                            timeoutSeconds = 1,
-                            rgb = blackFrame,
-                            ledCount = leds,
-                            colorOrder = device.calibration.colorOrder
-                        )
-                        delay(40L)
+        CoroutineScope(Dispatchers.IO).launch {
+            withContext(NonCancellable) {
+                try {
+                    val haConfig = config.homeAssistant
+                    if (haConfig.enabled && haConfig.turnOffOnStop) {
+                        haThrottler?.turnOffAll(haConfig)
                     }
+                    for (device in config.enabledDevices) {
+                        val leds = device.totalLeds
+                        if (leds > 0) {
+                            val blackFrame = ByteArray(leds * 3)
+                            // Send blackout frames to immediately turn off LEDs before HTTP takes effect
+                            for (i in 0..2) {
+                                udpSender.sendDrgbFrame(
+                                    ip = device.ip,
+                                    port = device.port,
+                                    timeoutSeconds = 1,
+                                    rgb = blackFrame,
+                                    ledCount = leds,
+                                    colorOrder = device.calibration.colorOrder
+                                )
+                                delay(40L)
+                            }
+                        }
+                        // Clear frame buffer so stale frames are never re-transmitted
+                        deviceBuffers[device.id]?.fill(0)
+                        // Hardware turn-off command via HTTP JSON API
+                        httpClient.turnOff(device.ip)
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error during blackout and power off", e)
                 }
-                // Clear frame buffer so stale frames are never re-transmitted
-                deviceBuffers[device.id]?.fill(0)
-                // Hardware turn-off command via HTTP JSON API
-                httpClient.turnOff(device.ip)
             }
         }
     }

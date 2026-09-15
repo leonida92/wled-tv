@@ -1,182 +1,473 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:background="@color/surface_card"
-    android:orientation="vertical"
-    android:padding="20dp">
+    android:fillViewport="true"
+    android:scrollbars="vertical"
+    android:scrollbarStyle="outsideOverlay">
 
-    <!-- Header: Light Name & Capability Badge -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:gravity="center_vertical"
-        android:orientation="horizontal">
+        android:orientation="vertical"
+        android:padding="20dp">
 
-        <TextView
-            android:id="@+id/tvDialogLightName"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="Light Name"
-            android:textColor="@color/text_primary"
-            android:textSize="18sp"
-            android:textStyle="bold" />
-
-        <TextView
-            android:id="@+id/tvDialogCapabilityBadge"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:background="@drawable/bg_pill_button"
-            android:paddingStart="8dp"
-            android:paddingTop="2dp"
-            android:paddingEnd="8dp"
-            android:paddingBottom="2dp"
-            android:text="RGB + Dim"
-            android:textColor="@color/accent_cyan"
-            android:textSize="11sp"
-            android:textStyle="bold" />
-    </LinearLayout>
-
-    <TextView
-        android:id="@+id/tvDialogEntityId"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="2dp"
-        android:text="light.entity_id"
-        android:textColor="@color/text_muted"
-        android:textSize="12sp" />
-
-    <!-- Interactive TV Screen Zone Preview -->
-    <com.wled.tv.ui.views.HaZonePreviewView
-        android:id="@+id/haZonePreview"
-        android:layout_width="match_parent"
-        android:layout_height="130dp"
-        android:layout_marginTop="12dp" />
-
-    <!-- Option 1: Sampling Zone -->
-    <LinearLayout
-        android:id="@+id/btnDialogSelectZone"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:background="@drawable/bg_card_selector"
-        android:clickable="true"
-        android:focusable="true"
-        android:gravity="center_vertical"
-        android:nextFocusDown="@+id/btnDialogSelectBri"
-        android:orientation="horizontal"
-        android:padding="10dp">
-
+        <!-- Header: Light Name & Capability Badge -->
         <LinearLayout
-            android:layout_width="0dp"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:orientation="vertical">
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
 
             <TextView
-                android:layout_width="wrap_content"
+                android:id="@+id/tvDialogLightName"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:text="Sampling Zone"
+                android:layout_weight="1"
+                android:text="Light Name"
                 android:textColor="@color/text_primary"
-                android:textSize="14sp"
+                android:textSize="18sp"
                 android:textStyle="bold" />
 
             <TextView
+                android:id="@+id/tvDialogCapabilityBadge"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Select area: Full Screen, Left, Right, Top, Bottom, Custom"
-                android:textColor="@color/text_muted"
-                android:textSize="11sp" />
+                android:background="@drawable/bg_pill_button"
+                android:paddingStart="8dp"
+                android:paddingTop="2dp"
+                android:paddingEnd="8dp"
+                android:paddingBottom="2dp"
+                android:text="RGB + Dim"
+                android:textColor="@color/accent_cyan"
+                android:textSize="11sp"
+                android:textStyle="bold" />
         </LinearLayout>
 
         <TextView
-            android:id="@+id/tvDialogLightZoneValue"
+            android:id="@+id/tvDialogEntityId"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:background="@drawable/bg_pill_button"
-            android:paddingStart="12dp"
-            android:paddingTop="4dp"
-            android:paddingEnd="12dp"
-            android:paddingBottom="4dp"
-            android:text="Full Screen"
-            android:textColor="@color/accent_cyan"
-            android:textSize="12sp"
-            android:textStyle="bold" />
-    </LinearLayout>
+            android:layout_marginTop="2dp"
+            android:text="light.entity_id"
+            android:textColor="@color/text_muted"
+            android:textSize="12sp" />
 
-    <!-- Option 3: Max Brightness -->
-    <LinearLayout
-        android:id="@+id/btnDialogSelectBri"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
-        android:background="@drawable/bg_card_selector"
-        android:clickable="true"
-        android:focusable="true"
-        android:gravity="center_vertical"
-        android:nextFocusUp="@+id/btnDialogSelectZone"
-        android:nextFocusDown="@+id/btnDialogLightDone"
-        android:orientation="horizontal"
-        android:padding="10dp">
+        <!-- Interactive TV Screen Zone Preview -->
+        <com.wled.tv.ui.views.HaZonePreviewView
+            android:id="@+id/haZonePreview"
+            android:layout_width="match_parent"
+            android:layout_height="130dp"
+            android:layout_marginTop="12dp" />
 
+        <!-- Option 1: Sampling Zone -->
         <LinearLayout
-            android:layout_width="0dp"
+            android:id="@+id/btnDialogSelectZone"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:orientation="vertical">
+            android:layout_marginTop="12dp"
+            android:background="@drawable/bg_card_selector"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:padding="10dp">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Sampling Zone"
+                    android:textColor="@color/text_primary"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Select area: Full Screen, Left, Right, Top, Bottom, Custom"
+                    android:textColor="@color/text_muted"
+                    android:textSize="11sp" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/tvDialogLightZoneValue"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_pill_button"
+                android:paddingStart="12dp"
+                android:paddingTop="4dp"
+                android:paddingEnd="12dp"
+                android:paddingBottom="4dp"
+                android:text="Full Screen"
+                android:textColor="@color/accent_cyan"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <!-- Custom Bounding Box Controls (Visible only when zoneType == CUSTOM_RECT) -->
+        <LinearLayout
+            android:id="@+id/layoutCustomBoxControls"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_card"
+            android:orientation="vertical"
+            android:padding="12dp"
+            android:visibility="gone">
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Brightness Limit"
-                android:textColor="@color/text_primary"
-                android:textSize="14sp"
+                android:text="Custom Sampling Box (0% - 100%)"
+                android:textColor="@color/accent_cyan"
+                android:textSize="12sp"
                 android:textStyle="bold" />
 
             <TextView
+                android:id="@+id/tvCustomBoxInstruction"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Cap maximum output level"
+                android:layout_marginTop="2dp"
+                android:text="Click an edge to adjust with Left / Right"
                 android:textColor="@color/text_muted"
-                android:textSize="11sp" />
+                android:textSize="10sp" />
+
+            <!-- Quick Presets Row -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/btnPresetCenter50"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_card_selector"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center"
+                    android:nextFocusDown="@+id/itemBoxLeft"
+                    android:paddingTop="6dp"
+                    android:paddingBottom="6dp"
+                    android:text="Center 50%"
+                    android:textColor="@color/text_primary"
+                    android:textSize="11sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/btnPresetTopHalf"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_card_selector"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center"
+                    android:nextFocusDown="@+id/itemBoxLeft"
+                    android:paddingTop="6dp"
+                    android:paddingBottom="6dp"
+                    android:text="Top Half"
+                    android:textColor="@color/text_primary"
+                    android:textSize="11sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/btnPresetBottomHalf"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_card_selector"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center"
+                    android:nextFocusDown="@+id/itemBoxRight"
+                    android:paddingTop="6dp"
+                    android:paddingBottom="6dp"
+                    android:text="Bottom Half"
+                    android:textColor="@color/text_primary"
+                    android:textSize="11sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/btnPresetFull"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_card_selector"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center"
+                    android:nextFocusDown="@+id/itemBoxRight"
+                    android:paddingTop="6dp"
+                    android:paddingBottom="6dp"
+                    android:text="Full 100%"
+                    android:textColor="@color/text_primary"
+                    android:textSize="11sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <!-- Stepper: Left % and Right % -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal">
+
+                <!-- Left % Stepper Card -->
+                <LinearLayout
+                    android:id="@+id/itemBoxLeft"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_card_selector"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center_vertical"
+                    android:nextFocusRight="@+id/itemBoxRight"
+                    android:nextFocusUp="@+id/btnPresetCenter50"
+                    android:nextFocusDown="@+id/itemBoxTop"
+                    android:orientation="horizontal"
+                    android:padding="8dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Left Edge"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/tvBoxLeftValue"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/bg_pill_button"
+                        android:paddingStart="8dp"
+                        android:paddingTop="2dp"
+                        android:paddingEnd="8dp"
+                        android:paddingBottom="2dp"
+                        android:text="20%"
+                        android:textColor="@color/accent_cyan"
+                        android:textSize="11sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
+
+                <!-- Right % Stepper Card -->
+                <LinearLayout
+                    android:id="@+id/itemBoxRight"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_card_selector"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center_vertical"
+                    android:nextFocusLeft="@+id/itemBoxLeft"
+                    android:nextFocusUp="@+id/btnPresetBottomHalf"
+                    android:nextFocusDown="@+id/itemBoxBottom"
+                    android:orientation="horizontal"
+                    android:padding="8dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Right Edge"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/tvBoxRightValue"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/bg_pill_button"
+                        android:paddingStart="8dp"
+                        android:paddingTop="2dp"
+                        android:paddingEnd="8dp"
+                        android:paddingBottom="2dp"
+                        android:text="80%"
+                        android:textColor="@color/accent_cyan"
+                        android:textSize="11sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- Stepper: Top % and Bottom % -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:orientation="horizontal">
+
+                <!-- Top % Stepper Card -->
+                <LinearLayout
+                    android:id="@+id/itemBoxTop"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_card_selector"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center_vertical"
+                    android:nextFocusRight="@+id/itemBoxBottom"
+                    android:nextFocusUp="@+id/itemBoxLeft"
+                    android:nextFocusDown="@+id/btnDialogSelectBri"
+                    android:orientation="horizontal"
+                    android:padding="8dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Top Edge"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/tvBoxTopValue"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/bg_pill_button"
+                        android:paddingStart="8dp"
+                        android:paddingTop="2dp"
+                        android:paddingEnd="8dp"
+                        android:paddingBottom="2dp"
+                        android:text="20%"
+                        android:textColor="@color/accent_cyan"
+                        android:textSize="11sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
+
+                <!-- Bottom % Stepper Card -->
+                <LinearLayout
+                    android:id="@+id/itemBoxBottom"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_card_selector"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center_vertical"
+                    android:nextFocusLeft="@+id/itemBoxTop"
+                    android:nextFocusUp="@+id/itemBoxRight"
+                    android:nextFocusDown="@+id/btnDialogSelectBri"
+                    android:orientation="horizontal"
+                    android:padding="8dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Bottom Edge"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/tvBoxBottomValue"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/bg_pill_button"
+                        android:paddingStart="8dp"
+                        android:paddingTop="2dp"
+                        android:paddingEnd="8dp"
+                        android:paddingBottom="2dp"
+                        android:text="80%"
+                        android:textColor="@color/accent_cyan"
+                        android:textSize="11sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
+            </LinearLayout>
         </LinearLayout>
 
-        <TextView
-            android:id="@+id/tvDialogLightBriValue"
-            android:layout_width="wrap_content"
+        <!-- Option 3: Max Brightness -->
+        <LinearLayout
+            android:id="@+id/btnDialogSelectBri"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="@drawable/bg_pill_button"
-            android:paddingStart="12dp"
-            android:paddingTop="4dp"
-            android:paddingEnd="12dp"
-            android:paddingBottom="4dp"
-            android:text="100%"
-            android:textColor="@color/accent_cyan"
-            android:textSize="12sp"
-            android:textStyle="bold" />
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_card_selector"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:padding="10dp">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Brightness Limit"
+                    android:textColor="@color/text_primary"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Cap maximum output level"
+                    android:textColor="@color/text_muted"
+                    android:textSize="11sp" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/tvDialogLightBriValue"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_pill_button"
+                android:paddingStart="12dp"
+                android:paddingTop="4dp"
+                android:paddingEnd="12dp"
+                android:paddingBottom="4dp"
+                android:text="100%"
+                android:textColor="@color/accent_cyan"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <!-- Action Buttons Row -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:gravity="end"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btnDialogLightDone"
+                android:layout_width="wrap_content"
+                android:layout_height="38dp"
+                android:background="@drawable/bg_button_selector"
+                android:paddingStart="24dp"
+                android:paddingEnd="24dp"
+                android:text="Close"
+                android:textColor="@color/accent_cyan"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
     </LinearLayout>
-
-    <!-- Action Buttons Row -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="14dp"
-        android:gravity="end"
-        android:orientation="horizontal">
-
-        <Button
-            android:id="@+id/btnDialogLightDone"
-            android:layout_width="wrap_content"
-            android:layout_height="38dp"
-            android:background="@drawable/bg_button_selector"
-            android:nextFocusUp="@+id/btnDialogSelectBri"
-            android:paddingStart="24dp"
-            android:paddingEnd="24dp"
-            android:text="Close"
-            android:textColor="@color/accent_cyan"
-            android:textSize="13sp"
-            android:textStyle="bold" />
-    </LinearLayout>
-
-</LinearLayout>
+</ScrollView>

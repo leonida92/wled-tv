@@ -249,6 +249,8 @@ class CalibrationActivity : AppCompatActivity() {
             val leds = dev.totalLeds
             if (leds <= 0) return@launch
 
+            val frame = ByteArray(leds * 3)
+
             while (isActive && activeTestColor != null) {
                 val color = activeTestColor ?: break
                 val c = dev.calibration
@@ -258,7 +260,6 @@ class CalibrationActivity : AppCompatActivity() {
                 val g = (color.second * c.gainG * briScale).roundToInt().coerceIn(0, 255).toByte()
                 val b = (color.third * c.gainB * briScale).roundToInt().coerceIn(0, 255).toByte()
 
-                val frame = ByteArray(leds * 3)
                 for (i in 0 until leds) {
                     val idx = i * 3
                     frame[idx] = r

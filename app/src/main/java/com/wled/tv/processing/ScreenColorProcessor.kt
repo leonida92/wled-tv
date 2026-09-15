@@ -31,6 +31,21 @@ class ScreenColorProcessor {
     private var lastAppliedTopCrop: Float = -1f
     private var lastAppliedBottomCrop: Float = -1f
 
+    // Precomputed Gamma Lookup Tables (256 entries each)
+    private var cachedGammaR: Float = -1f
+    private var cachedGammaG: Float = -1f
+    private var cachedGammaB: Float = -1f
+    private val gammaLutR = FloatArray(256)
+    private val gammaLutG = FloatArray(256)
+    private val gammaLutB = FloatArray(256)
+
+    // Pre-allocated letterbox probe coordinates
+    private val probeX = IntArray(9)
+    private var lastProbeWidth: Int = -1
+
+    // Cached ambient strip sub-zones to prevent per-frame allocations
+    private val ambientZonesMap = HashMap<String, List<RectF>>()
+
     fun reset() {
         smoothingFilters.clear()
         detectedTopCrop = 0.0f
@@ -42,6 +57,38 @@ class ScreenColorProcessor {
         lastPerimeterConfig = null
         lastAppliedTopCrop = -1f
         lastAppliedBottomCrop = -1f
+        ambientZonesMap.clear()
+        cachedGammaR = -1f
+        cachedGammaG = -1f
+        cachedGammaB = -1f
+        lastProbeWidth = -1
+    }
+
+    private fun updateGammaLuts(gR: Float, gG: Float, gB: Float) {
+        if (gR != cachedGammaR) {
+            cachedGammaR = gR
+            if (gR == 1.0f) {
+                for (i in 0..255) gammaLutR[i] = i.toFloat()
+            } else {
+                for (i in 0..255) gammaLutR[i] = 255f * (i / 255f).pow(gR)
+            }
+        }
+        if (gG != cachedGammaG) {
+            cachedGammaG = gG
+            if (gG == 1.0f) {
+                for (i in 0..255) gammaLutG[i] = i.toFloat()
+            } else {
+                for (i in 0..255) gammaLutG[i] = 255f * (i / 255f).pow(gG)
+            }
+        }
+        if (gB != cachedGammaB) {
+            cachedGammaB = gB
+            if (gB == 1.0f) {
+                for (i in 0..255) gammaLutB[i] = i.toFloat()
+            } else {
+                for (i in 0..255) gammaLutB[i] = 255f * (i / 255f).pow(gB)
+            }
+        }
     }
 
     /**
@@ -215,48 +262,44 @@ class ScreenColorProcessor {
                 outOffset = 0
             )
         } else {
-            // Multi-LED Strip / Lightbar: Spatially slice the region across all LEDs
-            for (i in 0 until ledCount) {
-                val subZone = when (device.type) {
-                    DeviceType.LEFT_AMBIENT -> {
-                        val step = (region.bottom - region.top) / ledCount
-                        val t = region.top + (i * step)
-                        val b = t + step
-                        RectF(region.left, t.coerceAtLeast(region.top), region.right, b.coerceAtMost(region.bottom))
+            // Multi-LED Strip / Lightbar: Spatially slice the region across all LEDs (cached to eliminate per-frame allocations)
+            val cacheKey = "${device.id}_${ledCount}_${device.type.name}_${region.left}_${region.top}_${region.right}_${region.bottom}"
+            val subZones = ambientZonesMap.getOrPut(cacheKey) {
+                val list = ArrayList<RectF>(ledCount)
+                for (i in 0 until ledCount) {
+                    val subZone = when (device.type) {
+                        DeviceType.LEFT_AMBIENT, DeviceType.RIGHT_AMBIENT -> {
+                            val step = (region.bottom - region.top) / ledCount
+                            val t = region.top + (i * step)
+                            val b = t + step
+                            RectF(region.left, t.coerceAtLeast(region.top), region.right, b.coerceAtMost(region.bottom))
+                        }
+                        DeviceType.TOP_AMBIENT, DeviceType.BOTTOM_AMBIENT -> {
+                            val step = (region.right - region.left) / ledCount
+                            val l = region.left + (i * step)
+                            val r = l + step
+                            RectF(l.coerceAtLeast(region.left), region.top, r.coerceAtMost(region.right), region.bottom)
+                        }
+                        else -> {
+                            val step = (region.right - region.left) / ledCount
+                            val l = region.left + (i * step)
+                            val r = l + step
+                            RectF(l.coerceAtLeast(region.left), region.top, r.coerceAtMost(region.right), region.bottom)
+                        }
                     }
-                    DeviceType.RIGHT_AMBIENT -> {
-                        val step = (region.bottom - region.top) / ledCount
-                        val t = region.top + (i * step)
-                        val b = t + step
-                        RectF(region.left, t.coerceAtLeast(region.top), region.right, b.coerceAtMost(region.bottom))
-                    }
-                    DeviceType.TOP_AMBIENT -> {
-                        val step = (region.right - region.left) / ledCount
-                        val l = region.left + (i * step)
-                        val r = l + step
-                        RectF(l.coerceAtLeast(region.left), region.top, r.coerceAtMost(region.right), region.bottom)
-                    }
-                    DeviceType.BOTTOM_AMBIENT -> {
-                        val step = (region.right - region.left) / ledCount
-                        val l = region.left + (i * step)
-                        val r = l + step
-                        RectF(l.coerceAtLeast(region.left), region.top, r.coerceAtMost(region.right), region.bottom)
-                    }
-                    else -> {
-                        val step = (region.right - region.left) / ledCount
-                        val l = region.left + (i * step)
-                        val r = l + step
-                        RectF(l.coerceAtLeast(region.left), region.top, r.coerceAtMost(region.right), region.bottom)
-                    }
+                    list.add(subZone)
                 }
+                list
+            }
 
+            for (i in 0 until ledCount) {
                 sampleChromaWeightedBox(
                     buffer = buffer,
                     width = width,
                     height = height,
                     rowStride = rowStride,
                     pixelStride = pixelStride,
-                    zone = subZone,
+                    zone = subZones[i],
                     calibration = calibration,
                     outBuffer = rawRgbBuffer,
                     outOffset = i * 3
@@ -271,17 +314,19 @@ class ScreenColorProcessor {
 
     /**
      * Extracts color and brightness for a Home Assistant light based on its configured zone or custom bounding box.
-     * Returns IntArray [R, G, B, Brightness (0-255)].
+     * Populates outResult [R, G, B, Brightness (0-255)].
      */
     fun processHaLight(
         image: Image,
         light: HomeAssistantLight,
-        calibration: ColorCalibration
-    ): IntArray? {
+        calibration: ColorCalibration,
+        outResult: IntArray
+    ): Boolean {
+        if (outResult.size < 4) return false
         val planes = image.planes
-        if (planes.isEmpty()) return null
+        if (planes.isEmpty()) return false
         val plane = planes[0]
-        val buffer = plane.buffer ?: return null
+        val buffer = plane.buffer ?: return false
 
         val width = image.width
         val height = image.height
@@ -318,7 +363,21 @@ class ScreenColorProcessor {
         val g = haSampleBuffer[1].toInt() and 0xFF
         val b = haSampleBuffer[2].toInt() and 0xFF
         val bri = max(r, max(g, b))
-        return intArrayOf(r, g, b, bri)
+
+        outResult[0] = r
+        outResult[1] = g
+        outResult[2] = b
+        outResult[3] = bri
+        return true
+    }
+
+    fun processHaLight(
+        image: Image,
+        light: HomeAssistantLight,
+        calibration: ColorCalibration
+    ): IntArray? {
+        val result = IntArray(4)
+        return if (processHaLight(image, light, calibration, result)) result else null
     }
 
     private fun sampleChromaWeightedBox(
@@ -406,10 +465,11 @@ class ScreenColorProcessor {
                 val gB = calibration.gainB.coerceIn(0.2f, 2.5f)
                 val maxBrightness = calibration.maxBrightness.coerceIn(0, 255)
 
-                // 1. Apply Gamma Curves
-                if (gammaR != 1.0f) outR = 255f * (outR / 255f).pow(gammaR)
-                if (gammaG != 1.0f) outG = 255f * (outG / 255f).pow(gammaG)
-                if (gammaB != 1.0f) outB = 255f * (outB / 255f).pow(gammaB)
+                // 1. Apply Gamma Curves via precomputed O(1) LUT (eliminates ~27,000 pow() calls/sec)
+                updateGammaLuts(gammaR, gammaG, gammaB)
+                outR = gammaLutR[outR.roundToInt().coerceIn(0, 255)]
+                outG = gammaLutG[outG.roundToInt().coerceIn(0, 255)]
+                outB = gammaLutB[outB.roundToInt().coerceIn(0, 255)]
 
                 // 2. Contrast adjustment (around midpoint 128)
                 if (contrast != 1.0f) {
@@ -456,17 +516,18 @@ class ScreenColorProcessor {
         rowStride: Int,
         pixelStride: Int
     ) {
-        val probeX = intArrayOf(
-            (width * 0.10f).toInt(),
-            (width * 0.20f).toInt(),
-            (width * 0.30f).toInt(),
-            (width * 0.40f).toInt(),
-            (width * 0.50f).toInt(),
-            (width * 0.60f).toInt(),
-            (width * 0.70f).toInt(),
-            (width * 0.80f).toInt(),
-            (width * 0.90f).toInt()
-        )
+        if (width != lastProbeWidth) {
+            lastProbeWidth = width
+            probeX[0] = (width * 0.10f).toInt()
+            probeX[1] = (width * 0.20f).toInt()
+            probeX[2] = (width * 0.30f).toInt()
+            probeX[3] = (width * 0.40f).toInt()
+            probeX[4] = (width * 0.50f).toInt()
+            probeX[5] = (width * 0.60f).toInt()
+            probeX[6] = (width * 0.70f).toInt()
+            probeX[7] = (width * 0.80f).toInt()
+            probeX[8] = (width * 0.90f).toInt()
+        }
 
         val maxScanRows = (height * 0.30f).toInt()
         var foundTop = 0
