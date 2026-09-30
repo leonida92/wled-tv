@@ -19,6 +19,7 @@ data class ColorCalibration(
 ) {
     val resolutionLabel: String
         get() = when (captureWidth) {
+            80 -> "80x45 (Ultra)"
             160 -> "160x90 (Eco)"
             480 -> "480x270 (High)"
             else -> "320x180 (Std)"

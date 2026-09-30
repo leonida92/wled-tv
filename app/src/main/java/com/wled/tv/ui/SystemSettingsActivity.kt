@@ -125,9 +125,10 @@ class SystemSettingsActivity : AppCompatActivity() {
 
     private fun cycleResolution() {
         val (nextWidth, nextHeight) = when (config.calibration.captureWidth) {
+            80 -> Pair(160, 90)
             160 -> Pair(320, 180)
             320 -> Pair(480, 270)
-            else -> Pair(160, 90)
+            else -> Pair(80, 45)
         }
         config = config.copy(
             calibration = config.calibration.copy(

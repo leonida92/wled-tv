@@ -70,6 +70,7 @@ class AmbientCaptureService : Service() {
     private var isScreenOff = AtomicBoolean(false)
     private var lastFrameTime = 0L
     private var lastSendTime = 0L
+    private var lastLivePreviewTime = 0L
     private var captureWidth = 320
     private var captureHeight = 180
 
@@ -302,7 +303,10 @@ class AmbientCaptureService : Service() {
 
     private fun initCapture() {
         try {
-            backgroundThread = HandlerThread("WledCaptureThread").apply { start() }
+            backgroundThread = HandlerThread(
+                "WledCaptureThread",
+                android.os.Process.THREAD_PRIORITY_BACKGROUND
+            ).apply { start() }
             backgroundHandler = Handler(backgroundThread!!.looper)
 
             val windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
@@ -318,7 +322,7 @@ class AmbientCaptureService : Service() {
                 captureWidth,
                 captureHeight,
                 PixelFormat.RGBA_8888,
-                2
+                3
             )
             imageReader = reader
             setupImageAvailableListener(reader)
@@ -377,7 +381,24 @@ class AmbientCaptureService : Service() {
             }
             lastFrameTime = now
 
+            val readyToSendDevices = mutableListOf<WledDevice>()
+
             try {
+                val planes = image.planes
+                if (planes.isEmpty()) return@setOnImageAvailableListener
+                val plane = planes[0]
+                val buffer = plane.buffer ?: return@setOnImageAvailableListener
+
+                val width = image.width
+                val height = image.height
+                val rowStride = plane.rowStride
+                val pixelStride = plane.pixelStride
+
+                val anyAutoLetterbox = config.enabledDevices.any { it.perimeter.autoLetterbox }
+                if (anyAutoLetterbox) {
+                    colorProcessor.scanLetterbox(buffer, width, height, rowStride, pixelStride)
+                }
+
                 val devices = config.enabledDevices
                 for (device in devices) {
                     val leds = device.totalLeds
@@ -390,25 +411,37 @@ class AmbientCaptureService : Service() {
                         deviceBuffers[device.id] = buf
                     }
 
-                    if (colorProcessor.processDevice(image, device, device.calibration, buf)) {
-                        udpSender.sendDrgbFrame(
-                            ip = device.ip,
-                            port = device.port,
-                            timeoutSeconds = 5,
-                            rgb = buf,
-                            ledCount = leds,
-                            colorOrder = device.calibration.colorOrder
-                        )
-
-                        liveFrameListener?.onDeviceFrameProcessed(device.id, buf, leds)
+                    if (colorProcessor.processDevice(buffer, width, height, rowStride, pixelStride, device, device.calibration, buf)) {
+                        readyToSendDevices.add(device)
                     }
                 }
-                lastSendTime = now
             } catch (e: Exception) {
                 Log.e(TAG, "Error processing frame", e)
             } finally {
+                // Free the hardware graphic buffer IMMEDIATELY before network I/O
                 image.close()
             }
+
+            for (device in readyToSendDevices) {
+                val leds = device.totalLeds
+                val buf = deviceBuffers[device.id] ?: continue
+                udpSender.sendDrgbFrame(
+                    ip = device.ip,
+                    port = device.port,
+                    timeoutSeconds = 5,
+                    rgb = buf,
+                    ledCount = leds,
+                    colorOrder = device.calibration.colorOrder
+                )
+
+                if (liveFrameListener != null && (now - lastLivePreviewTime >= 50L)) {
+                    lastLivePreviewTime = now
+                    val previewCopy = buf.copyOf(leds * 3)
+                    liveFrameListener?.onDeviceFrameProcessed(device.id, previewCopy, leds)
+                }
+            }
+
+            lastSendTime = now
         }, backgroundHandler)
     }
 
@@ -429,7 +462,7 @@ class AmbientCaptureService : Service() {
                     newWidth,
                     newHeight,
                     PixelFormat.RGBA_8888,
-                    2
+                    3
                 )
                 setupImageAvailableListener(newReader)
                 imageReader = newReader

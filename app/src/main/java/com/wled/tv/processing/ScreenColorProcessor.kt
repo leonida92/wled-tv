@@ -70,6 +70,10 @@ class ScreenColorProcessor {
         )
     }
 
+    fun scanLetterbox(buffer: ByteBuffer, width: Int, height: Int, rowStride: Int, pixelStride: Int) {
+        detectLetterbox(buffer, width, height, rowStride, pixelStride)
+    }
+
     /**
      * Extracts colors for a specific WLED device based on its configured type and region.
      */
@@ -84,9 +88,6 @@ class ScreenColorProcessor {
         outputRgb: ByteArray
     ): Boolean {
         if (width <= 0 || height <= 0) return false
-
-        // Run real-time letterbox scan on every frame
-        detectLetterbox(buffer, width, height, rowStride, pixelStride)
 
         return if (device.type == DeviceType.PERIMETER || (device.perimeter.totalLeds > 0 && device.perimeter.totalLeds == device.totalLeds)) {
             processPerimeter(buffer, width, height, rowStride, pixelStride, device, calibration, outputRgb)

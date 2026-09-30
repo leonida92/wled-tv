@@ -28,4 +28,12 @@ class ColorCalibrationTest {
         assertEquals(270, cal.captureHeight)
         assertEquals("480x270 (High)", cal.resolutionLabel)
     }
+
+    @Test
+    fun ultraResolution_labelIsCorrect() {
+        val cal = ColorCalibration(captureWidth = 80, captureHeight = 45)
+        assertEquals(80, cal.captureWidth)
+        assertEquals(45, cal.captureHeight)
+        assertEquals("80x45 (Ultra)", cal.resolutionLabel)
+    }
 }
