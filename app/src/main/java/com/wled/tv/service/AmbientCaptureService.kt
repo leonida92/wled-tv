@@ -171,7 +171,7 @@ class AmbientCaptureService : Service() {
             powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
             wakeLock = powerManager?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "WLED_TV:AmbientWakeLock")?.apply {
                 setReferenceCounted(false)
-                acquire()
+                acquire(6 * 60 * 60 * 1000L) // 6-hour maximum session guard timeout
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to acquire WakeLock", e)

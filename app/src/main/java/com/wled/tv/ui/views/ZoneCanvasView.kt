@@ -125,14 +125,12 @@ class ZoneCanvasView @JvmOverloads constructor(
         // 4. Draw all LED sampling zones
         val zones = config.computeLedZones()
         for (z in zones) {
-            val zRect = RectF(
-                z.left * w,
-                z.top * h,
-                z.right * w,
-                z.bottom * h
-            )
-            canvas.drawRect(zRect, zoneBoxFillPaint)
-            canvas.drawRect(zRect, zoneBoxStrokePaint)
+            val zl = z.left * w
+            val zt = z.top * h
+            val zr = z.right * w
+            val zb = z.bottom * h
+            canvas.drawRect(zl, zt, zr, zb, zoneBoxFillPaint)
+            canvas.drawRect(zl, zt, zr, zb, zoneBoxStrokePaint)
         }
 
         // 5. Draw 4 perimeter border lines with active selection highlight
@@ -159,10 +157,12 @@ class ZoneCanvasView @JvmOverloads constructor(
         val badgeH = 54f
         val badgeCx = w / 2f
         val badgeCy = (yTop + yBottom) / 2f
-        val badgeRect = RectF(badgeCx - badgeW / 2f, badgeCy - badgeH / 2f, badgeCx + badgeW / 2f, badgeCy + badgeH / 2f)
+        reusableBadgeRect.set(badgeCx - badgeW / 2f, badgeCy - badgeH / 2f, badgeCx + badgeW / 2f, badgeCy + badgeH / 2f)
 
-        canvas.drawRoundRect(badgeRect, 27f, 27f, aspectBadgeBgPaint)
-        canvas.drawRoundRect(badgeRect, 27f, 27f, inactiveBorderPaint)
+        canvas.drawRoundRect(reusableBadgeRect, 27f, 27f, aspectBadgeBgPaint)
+        canvas.drawRoundRect(reusableBadgeRect, 27f, 27f, inactiveBorderPaint)
         canvas.drawText(badgeText, badgeCx, badgeCy + 10f, aspectBadgeTextPaint)
     }
+
+    private val reusableBadgeRect = RectF()
 }

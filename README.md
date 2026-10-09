@@ -87,12 +87,13 @@ It captures on-screen video in real time, extracts rich chroma-weighted edge and
 2. Connect from your computer:
    ```bash
    adb connect <TV_IP_ADDRESS>:5555
-   adb install -r wled-tv-v1.2.0.apk
+   adb install -r <path_to_downloaded_release_apk>
    ```
 
 ### Method 2: Sideload via USB or "Send Files to TV"
 1. Install **Send Files to TV** and a file manager from the Google TV Play Store.
-2. Send `wled-tv-v1.2.0.apk` to your TV and open it to install.
+2. Download the latest signed release APK from [GitHub Releases](https://github.com/leonida92/wled-tv/releases/latest).
+3. Send the APK to your TV and open it to install.
 
 ---
 
@@ -156,8 +157,8 @@ cd wled-tv
 ./gradlew assembleDebug
 
 # Output APKs located at:
-# app/build/outputs/apk/release/wled-tv-v1.2.0-release.apk
-# app/build/outputs/apk/debug/wled-tv-v1.2.0-debug.apk
+# app/build/outputs/apk/release/wled-tv-v<version>-release.apk
+# app/build/outputs/apk/debug/wled-tv-v<version>-debug.apk
 ```
 
 ---

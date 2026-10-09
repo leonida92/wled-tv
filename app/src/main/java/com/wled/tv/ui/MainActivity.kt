@@ -116,6 +116,11 @@ class MainActivity : AppCompatActivity(),
         pingPollingJob = null
     }
 
+    override fun onDestroy() {
+        super.onDestroy()
+        udpSender.close()
+    }
+
     private fun bindViews() {
         btnPower = findViewById(R.id.btnPower)
         tvPowerText = findViewById(R.id.tvPowerText)

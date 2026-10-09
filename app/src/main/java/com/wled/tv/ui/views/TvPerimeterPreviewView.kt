@@ -90,6 +90,11 @@ class TvPerimeterPreviewView @JvmOverloads constructor(
         color = Color.parseColor("#1A38BDF8")
     }
 
+    private val reusableTvRect = RectF()
+    private val reusableScreenRect = RectF()
+    private val defaultDeviceList = listOf(WledDevice())
+    private var perimeterCoords = FloatArray(1024)
+
     fun updateDevices(devices: List<WledDevice>) {
         this.devices = devices
         invalidate()
@@ -149,7 +154,7 @@ class TvPerimeterPreviewView @JvmOverloads constructor(
         val h = height.toFloat()
         if (w <= 0 || h <= 0) return
 
-        val displayDevices = devices.ifEmpty { listOf(WledDevice()) }
+        val displayDevices = if (devices.isEmpty()) defaultDeviceList else devices
 
         // 1. Calculate layer counts per edge to guarantee no preset is ever pushed off canvas
         var leftLayers = 0
@@ -205,19 +210,21 @@ class TvPerimeterPreviewView @JvmOverloads constructor(
 
         val left = padLeft + (availW - tvWidth) / 2f
         val top = padTop + (availH - tvHeight) / 2f
-        val tvRect = RectF(left, top, left + tvWidth, top + tvHeight)
+        reusableTvRect.set(left, top, left + tvWidth, top + tvHeight)
+        val tvRect = reusableTvRect
 
         // 2. Draw TV chassis & screen
         canvas.drawRoundRect(tvRect, 14f, 14f, tvBodyPaint)
         canvas.drawRoundRect(tvRect, 14f, 14f, tvBezelPaint)
 
         val screenInset = 6f
-        val screenRect = RectF(
+        reusableScreenRect.set(
             tvRect.left + screenInset,
             tvRect.top + screenInset,
             tvRect.right - screenInset,
             tvRect.bottom - screenInset
         )
+        val screenRect = reusableScreenRect
         canvas.drawRoundRect(screenRect, 10f, 10f, tvScreenPaint)
         canvas.drawRoundRect(screenRect, 10f, 10f, tvScreenInnerPaint)
 
@@ -251,25 +258,22 @@ class TvPerimeterPreviewView @JvmOverloads constructor(
                 return Color.HSVToColor(floatArrayOf(hue, 0.85f, 0.95f))
             }
 
-            fun drawDiodes(points: List<PointF>, radius: Float) {
-                for (i in points.indices) {
-                    val pt = points[i]
-                    val diodeColor = getDeviceLedColor(i, points.size)
+            fun drawDiode(x: Float, y: Float, index: Int, total: Int, radius: Float) {
+                val diodeColor = getDeviceLedColor(index, total)
 
-                    if (device.enabled) {
-                        diodeGlowPaint.color = diodeColor
-                        diodeGlowPaint.alpha = 50
-                        canvas.drawCircle(pt.x, pt.y, radius * 1.55f, diodeGlowPaint)
-                    }
+                if (device.enabled) {
+                    diodeGlowPaint.color = diodeColor
+                    diodeGlowPaint.alpha = 50
+                    canvas.drawCircle(x, y, radius * 1.55f, diodeGlowPaint)
+                }
 
-                    canvas.drawCircle(pt.x, pt.y, radius, diodeRimPaint)
+                canvas.drawCircle(x, y, radius, diodeRimPaint)
 
-                    diodeCorePaint.color = diodeColor
-                    canvas.drawCircle(pt.x, pt.y, radius * 0.8f, diodeCorePaint)
+                diodeCorePaint.color = diodeColor
+                canvas.drawCircle(x, y, radius * 0.8f, diodeCorePaint)
 
-                    if (device.enabled) {
-                        canvas.drawCircle(pt.x, pt.y, radius * 0.35f, diodeHotspotPaint)
-                    }
+                if (device.enabled) {
+                    canvas.drawCircle(x, y, radius * 0.35f, diodeHotspotPaint)
                 }
             }
 
@@ -279,77 +283,97 @@ class TvPerimeterPreviewView @JvmOverloads constructor(
                     val totalLeds = p.totalLeds
                     if (totalLeds <= 0) continue
 
+                    if (perimeterCoords.size < totalLeds * 2) {
+                        perimeterCoords = FloatArray(totalLeds * 2)
+                    }
+
                     val topOffset = (baseRadius * 1.8f) + (curTopLayer++ * layerSpacing)
                     val rightOffset = (baseRadius * 1.8f) + (curRightLayer++ * layerSpacing)
                     val bottomOffset = (baseRadius * 1.8f) + (curBottomLayer++ * layerSpacing)
                     val leftOffset = (baseRadius * 1.8f) + (curLeftLayer++ * layerSpacing)
 
-                    val topPoints = ArrayList<PointF>(p.topLeds)
-                    if (p.topLeds > 0) {
-                        val cy = tvRect.top - topOffset
-                        val step = (tvRect.width() - 8f) / p.topLeds
-                        for (i in 0 until p.topLeds) {
-                            topPoints.add(PointF(tvRect.left + 4f + (i + 0.5f) * step, cy))
+                    fun fillEdge(edge: Int, offset: Int): Int {
+                        var cur = offset
+                        when (edge) {
+                            0 -> { // LEFT
+                                if (p.leftLeds > 0) {
+                                    val cx = tvRect.left - leftOffset
+                                    val step = (tvRect.height() - 8f) / p.leftLeds
+                                    for (i in 0 until p.leftLeds) {
+                                        perimeterCoords[cur++] = cx
+                                        perimeterCoords[cur++] = tvRect.bottom - 4f - (i + 0.5f) * step
+                                    }
+                                }
+                            }
+                            1 -> { // TOP
+                                if (p.topLeds > 0) {
+                                    val cy = tvRect.top - topOffset
+                                    val step = (tvRect.width() - 8f) / p.topLeds
+                                    for (i in 0 until p.topLeds) {
+                                        perimeterCoords[cur++] = tvRect.left + 4f + (i + 0.5f) * step
+                                        perimeterCoords[cur++] = cy
+                                    }
+                                }
+                            }
+                            2 -> { // RIGHT
+                                if (p.rightLeds > 0) {
+                                    val cx = tvRect.right + rightOffset
+                                    val step = (tvRect.height() - 8f) / p.rightLeds
+                                    for (i in 0 until p.rightLeds) {
+                                        perimeterCoords[cur++] = cx
+                                        perimeterCoords[cur++] = tvRect.top + 4f + (i + 0.5f) * step
+                                    }
+                                }
+                            }
+                            3 -> { // BOTTOM
+                                if (p.bottomLeds > 0) {
+                                    val cy = tvRect.bottom + bottomOffset
+                                    val step = (tvRect.width() - 8f) / p.bottomLeds
+                                    for (i in 0 until p.bottomLeds) {
+                                        perimeterCoords[cur++] = tvRect.right - 4f - (i + 0.5f) * step
+                                        perimeterCoords[cur++] = cy
+                                    }
+                                }
+                            }
                         }
+                        return cur
                     }
 
-                    val rightPoints = ArrayList<PointF>(p.rightLeds)
-                    if (p.rightLeds > 0) {
-                        val cx = tvRect.right + rightOffset
-                        val step = (tvRect.height() - 8f) / p.rightLeds
-                        for (i in 0 until p.rightLeds) {
-                            rightPoints.add(PointF(cx, tvRect.top + 4f + (i + 0.5f) * step))
-                        }
-                    }
-
-                    val bottomPoints = ArrayList<PointF>(p.bottomLeds)
-                    if (p.bottomLeds > 0) {
-                        val cy = tvRect.bottom + bottomOffset
-                        val step = (tvRect.width() - 8f) / p.bottomLeds
-                        for (i in 0 until p.bottomLeds) {
-                            bottomPoints.add(PointF(tvRect.right - 4f - (i + 0.5f) * step, cy))
-                        }
-                    }
-
-                    val leftPoints = ArrayList<PointF>(p.leftLeds)
-                    if (p.leftLeds > 0) {
-                        val cx = tvRect.left - leftOffset
-                        val step = (tvRect.height() - 8f) / p.leftLeds
-                        for (i in 0 until p.leftLeds) {
-                            leftPoints.add(PointF(cx, tvRect.bottom - 4f - (i + 0.5f) * step))
-                        }
-                    }
-
-                    val clockwisePoints = ArrayList<PointF>(totalLeds)
+                    var ptr = 0
                     when (p.startCorner) {
                         Corner.BOTTOM_LEFT -> {
-                            clockwisePoints.addAll(leftPoints)
-                            clockwisePoints.addAll(topPoints)
-                            clockwisePoints.addAll(rightPoints)
-                            clockwisePoints.addAll(bottomPoints)
+                            ptr = fillEdge(0, ptr) // Left
+                            ptr = fillEdge(1, ptr) // Top
+                            ptr = fillEdge(2, ptr) // Right
+                            fillEdge(3, ptr) // Bottom
                         }
                         Corner.TOP_LEFT -> {
-                            clockwisePoints.addAll(topPoints)
-                            clockwisePoints.addAll(rightPoints)
-                            clockwisePoints.addAll(bottomPoints)
-                            clockwisePoints.addAll(leftPoints)
+                            ptr = fillEdge(1, ptr) // Top
+                            ptr = fillEdge(2, ptr) // Right
+                            ptr = fillEdge(3, ptr) // Bottom
+                            fillEdge(0, ptr) // Left
                         }
                         Corner.TOP_RIGHT -> {
-                            clockwisePoints.addAll(rightPoints)
-                            clockwisePoints.addAll(bottomPoints)
-                            clockwisePoints.addAll(leftPoints)
-                            clockwisePoints.addAll(topPoints)
+                            ptr = fillEdge(2, ptr) // Right
+                            ptr = fillEdge(3, ptr) // Bottom
+                            ptr = fillEdge(0, ptr) // Left
+                            fillEdge(1, ptr) // Top
                         }
                         Corner.BOTTOM_RIGHT -> {
-                            clockwisePoints.addAll(bottomPoints)
-                            clockwisePoints.addAll(leftPoints)
-                            clockwisePoints.addAll(topPoints)
-                            clockwisePoints.addAll(rightPoints)
+                            ptr = fillEdge(3, ptr) // Bottom
+                            ptr = fillEdge(0, ptr) // Left
+                            ptr = fillEdge(1, ptr) // Top
+                            fillEdge(2, ptr) // Right
                         }
                     }
 
-                    val finalPoints = if (p.direction == Direction.CLOCKWISE) clockwisePoints else clockwisePoints.reversed()
-                    drawDiodes(finalPoints, baseRadius)
+                    val isClockwise = (p.direction == Direction.CLOCKWISE)
+                    for (i in 0 until totalLeds) {
+                        val srcIdx = if (isClockwise) i else (totalLeds - 1 - i)
+                        val px = perimeterCoords[srcIdx * 2]
+                        val py = perimeterCoords[srcIdx * 2 + 1]
+                        drawDiode(px, py, i, totalLeds, baseRadius)
+                    }
 
                     // Subtle start corner ring
                     if (deviceIndex == 0 && totalLeds > 1) {
@@ -369,68 +393,64 @@ class TvPerimeterPreviewView @JvmOverloads constructor(
                     val count = device.totalLeds
                     val offset = (baseRadius * 1.8f) + (curLeftLayer++ * layerSpacing)
                     val cx = tvRect.left - offset
-                    val points = ArrayList<PointF>(count)
+                    val radius = if (count == 1) baseRadius * 1.3f else baseRadius
                     if (count == 1) {
-                        points.add(PointF(cx, tvRect.centerY()))
+                        drawDiode(cx, tvRect.centerY(), 0, 1, radius)
                     } else {
                         val step = (tvRect.height() * 0.7f) / count
                         val startY = tvRect.centerY() - (step * (count - 1) / 2f)
                         for (i in 0 until count) {
-                            points.add(PointF(cx, startY + (i * step)))
+                            drawDiode(cx, startY + (i * step), i, count, radius)
                         }
                     }
-                    drawDiodes(points, if (count == 1) baseRadius * 1.3f else baseRadius)
                 }
 
                 DeviceType.RIGHT_AMBIENT -> {
                     val count = device.totalLeds
                     val offset = (baseRadius * 1.8f) + (curRightLayer++ * layerSpacing)
                     val cx = tvRect.right + offset
-                    val points = ArrayList<PointF>(count)
+                    val radius = if (count == 1) baseRadius * 1.3f else baseRadius
                     if (count == 1) {
-                        points.add(PointF(cx, tvRect.centerY()))
+                        drawDiode(cx, tvRect.centerY(), 0, 1, radius)
                     } else {
                         val step = (tvRect.height() * 0.7f) / count
                         val startY = tvRect.centerY() - (step * (count - 1) / 2f)
                         for (i in 0 until count) {
-                            points.add(PointF(cx, startY + (i * step)))
+                            drawDiode(cx, startY + (i * step), i, count, radius)
                         }
                     }
-                    drawDiodes(points, if (count == 1) baseRadius * 1.3f else baseRadius)
                 }
 
                 DeviceType.TOP_AMBIENT -> {
                     val count = device.totalLeds
                     val offset = (baseRadius * 1.8f) + (curTopLayer++ * layerSpacing)
                     val cy = tvRect.top - offset
-                    val points = ArrayList<PointF>(count)
+                    val radius = if (count == 1) baseRadius * 1.3f else baseRadius
                     if (count == 1) {
-                        points.add(PointF(tvRect.centerX(), cy))
+                        drawDiode(tvRect.centerX(), cy, 0, 1, radius)
                     } else {
                         val step = (tvRect.width() * 0.7f) / count
                         val startX = tvRect.centerX() - (step * (count - 1) / 2f)
                         for (i in 0 until count) {
-                            points.add(PointF(startX + (i * step), cy))
+                            drawDiode(startX + (i * step), cy, i, count, radius)
                         }
                     }
-                    drawDiodes(points, if (count == 1) baseRadius * 1.3f else baseRadius)
                 }
 
                 DeviceType.BOTTOM_AMBIENT -> {
                     val count = device.totalLeds
                     val offset = (baseRadius * 1.8f) + (curBottomLayer++ * layerSpacing)
                     val cy = tvRect.bottom + offset
-                    val points = ArrayList<PointF>(count)
+                    val radius = if (count == 1) baseRadius * 1.3f else baseRadius
                     if (count == 1) {
-                        points.add(PointF(tvRect.centerX(), cy))
+                        drawDiode(tvRect.centerX(), cy, 0, 1, radius)
                     } else {
                         val step = (tvRect.width() * 0.7f) / count
                         val startX = tvRect.centerX() - (step * (count - 1) / 2f)
                         for (i in 0 until count) {
-                            points.add(PointF(startX + (i * step), cy))
+                            drawDiode(startX + (i * step), cy, i, count, radius)
                         }
                     }
-                    drawDiodes(points, if (count == 1) baseRadius * 1.3f else baseRadius)
                 }
 
                 DeviceType.FULL_SCREEN -> {

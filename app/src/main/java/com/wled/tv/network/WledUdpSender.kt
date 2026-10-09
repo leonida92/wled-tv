@@ -5,13 +5,15 @@ import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.SocketException
+import java.util.concurrent.ConcurrentHashMap
 
 class WledUdpSender {
 
+    @Volatile
     private var socket: DatagramSocket? = null
-    private val addressMap = HashMap<String, InetAddress>()
-    private val packetBuffers = HashMap<String, ByteArray>()
-    private val datagramPackets = HashMap<String, DatagramPacket>()
+    private val addressMap = ConcurrentHashMap<String, InetAddress>()
+    private val packetBuffers = ConcurrentHashMap<String, ByteArray>()
+    private val datagramPackets = ConcurrentHashMap<String, DatagramPacket>()
     private var lastErrorTime = 0L
 
     /**
@@ -40,7 +42,7 @@ class WledUdpSender {
         if (cleanIp.isBlank() || ledCount <= 0 || rgb.size < ledCount * 3) return
 
         try {
-            ensureSocket()
+            val currentSocket = ensureSocket()
 
             var address = addressMap[cleanIp]
             if (address == null) {
@@ -120,7 +122,7 @@ class WledUdpSender {
             }
 
             datagramPacket?.let {
-                socket?.send(it)
+                currentSocket.send(it)
             }
         } catch (e: SocketException) {
             handleSocketException(e, cleanIp)
@@ -133,15 +135,20 @@ class WledUdpSender {
         }
     }
 
-    private fun ensureSocket() {
-        if (socket == null || socket?.isClosed == true) {
-            socket = DatagramSocket().apply {
+    @Synchronized
+    private fun ensureSocket(): DatagramSocket {
+        var s = socket
+        if (s == null || s.isClosed) {
+            s = DatagramSocket().apply {
                 soTimeout = 1000
                 reuseAddress = true
             }
+            socket = s
         }
+        return s
     }
 
+    @Synchronized
     private fun handleSocketException(e: SocketException, ip: String) {
         val now = System.currentTimeMillis()
         if (now - lastErrorTime > 3000L) {
@@ -154,6 +161,7 @@ class WledUdpSender {
         socket = null
     }
 
+    @Synchronized
     fun close() {
         try {
             socket?.close()
