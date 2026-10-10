@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.res.ColorStateList
 import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
 import android.media.projection.MediaProjectionManager
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -19,13 +20,16 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.wled.tv.R
 import com.wled.tv.data.PreferencesRepository
+import com.wled.tv.model.DeviceThroughputStats
 import com.wled.tv.model.DeviceType
+import com.wled.tv.model.ThroughputStats
 import com.wled.tv.model.WledConfig
 import com.wled.tv.model.WledDevice
 import com.wled.tv.network.DeviceReachabilityCache
 import com.wled.tv.network.WledHttpClient
 import com.wled.tv.network.WledUdpSender
 import com.wled.tv.service.AmbientCaptureService
+import com.wled.tv.ui.views.PerformanceHistoryChartView
 import com.wled.tv.ui.views.TvPerimeterPreviewView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -37,7 +41,8 @@ import java.util.concurrent.ConcurrentHashMap
 
 class MainActivity : AppCompatActivity(),
     AmbientCaptureService.LiveFrameListener,
-    AmbientCaptureService.ServiceStateListener {
+    AmbientCaptureService.ServiceStateListener,
+    AmbientCaptureService.ThroughputListener {
 
     private lateinit var prefsRepo: PreferencesRepository
     private var config: WledConfig = WledConfig()
@@ -51,10 +56,18 @@ class MainActivity : AppCompatActivity(),
     private lateinit var viewStatusDot: View
     private lateinit var tvStatusTitle: TextView
 
+    private lateinit var btnThroughputPill: LinearLayout
+    private lateinit var viewThroughputDot: View
+    private lateinit var tvThroughputText: TextView
+
     private lateinit var btnTestStrip: LinearLayout
     private lateinit var btnSystemSettings: LinearLayout
     private lateinit var tvPreviewView: TvPerimeterPreviewView
     private lateinit var layoutDeviceDock: LinearLayout
+
+    private var throughputDialog: androidx.appcompat.app.AlertDialog? = null
+    private var currentDialogView: View? = null
+    private var selectedWindowSeconds = 300
 
     private var isTesting = false
     private var testPatternJob: Job? = null
@@ -97,10 +110,15 @@ class MainActivity : AppCompatActivity(),
         if (AmbientCaptureService.isRunning) {
             tvPreviewView.setLiveActive(true)
             AmbientCaptureService.liveFrameListener = this
+            AmbientCaptureService.throughputListener = this
+            btnThroughputPill.visibility = View.VISIBLE
+            AmbientCaptureService.latestStats?.let { updateThroughputUi(it) }
         } else {
             tvPreviewView.setLiveActive(false)
             tvPreviewView.clearLiveColors()
             AmbientCaptureService.liveFrameListener = null
+            AmbientCaptureService.throughputListener = null
+            btnThroughputPill.visibility = View.GONE
         }
         AmbientCaptureService.stateListener = this
         updateUiState()
@@ -109,7 +127,11 @@ class MainActivity : AppCompatActivity(),
 
     override fun onPause() {
         super.onPause()
+        throughputDialog?.dismiss()
+        throughputDialog = null
+        currentDialogView = null
         AmbientCaptureService.liveFrameListener = null
+        AmbientCaptureService.throughputListener = null
         AmbientCaptureService.stateListener = null
         stopTestPattern()
         pingPollingJob?.cancel()
@@ -128,6 +150,10 @@ class MainActivity : AppCompatActivity(),
         viewStatusDot = findViewById(R.id.viewStatusDot)
         tvStatusTitle = findViewById(R.id.tvStatusTitle)
 
+        btnThroughputPill = findViewById(R.id.btnThroughputPill)
+        viewThroughputDot = findViewById(R.id.viewThroughputDot)
+        tvThroughputText = findViewById(R.id.tvThroughputText)
+
         btnTestStrip = findViewById(R.id.btnTestStrip)
         btnSystemSettings = findViewById(R.id.btnSystemSettings)
         tvPreviewView = findViewById(R.id.tvPreviewView)
@@ -143,6 +169,10 @@ class MainActivity : AppCompatActivity(),
             } else {
                 requestScreenCapture()
             }
+        }
+
+        btnThroughputPill.setOnClickListener {
+            showThroughputDetailsDialog()
         }
 
         btnTestStrip.setOnClickListener {
@@ -391,6 +421,8 @@ class MainActivity : AppCompatActivity(),
     private fun startAmbientService(resultCode: Int, data: Intent) {
         tvPreviewView.setLiveActive(true)
         AmbientCaptureService.liveFrameListener = this
+        AmbientCaptureService.throughputListener = this
+        btnThroughputPill.visibility = View.VISIBLE
         val intent = Intent(this, AmbientCaptureService::class.java).apply {
             putExtra(AmbientCaptureService.EXTRA_RESULT_CODE, resultCode)
             putExtra(AmbientCaptureService.EXTRA_RESULT_DATA, data)
@@ -403,6 +435,8 @@ class MainActivity : AppCompatActivity(),
     private fun stopAmbientService() {
         AmbientCaptureService.isRunning = false
         AmbientCaptureService.liveFrameListener = null
+        AmbientCaptureService.throughputListener = null
+        btnThroughputPill.visibility = View.GONE
         tvPreviewView.setLiveActive(false)
         tvPreviewView.clearLiveColors()
         updateUiState()
@@ -486,9 +520,183 @@ class MainActivity : AppCompatActivity(),
             tvPreviewView.setLiveActive(running)
             if (!running) {
                 AmbientCaptureService.liveFrameListener = null
+                AmbientCaptureService.throughputListener = null
+                btnThroughputPill.visibility = View.GONE
                 tvPreviewView.clearLiveColors()
+            } else {
+                AmbientCaptureService.throughputListener = this
+                btnThroughputPill.visibility = View.VISIBLE
             }
             updateUiState()
         }
+    }
+
+    override fun onThroughputStatsUpdated(stats: ThroughputStats) {
+        runOnUiThread {
+            if (AmbientCaptureService.isRunning) {
+                updateThroughputUi(stats)
+                val dialogView = currentDialogView
+                if (throughputDialog?.isShowing == true && dialogView != null) {
+                    refreshDialogTelemetry(dialogView, stats, selectedWindowSeconds)
+                }
+            }
+        }
+    }
+
+    private fun updateThroughputUi(stats: ThroughputStats) {
+        btnThroughputPill.visibility = View.VISIBLE
+        tvThroughputText.text = "${stats.fps} fps • ${stats.pps} pps"
+        viewThroughputDot.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#00E5FF"))
+        tvThroughputText.setTextColor(Color.parseColor("#F8FAFC"))
+    }
+
+    private fun refreshDialogTelemetry(dialogView: View, stats: ThroughputStats, windowSec: Int) {
+        val tvFpsValue = dialogView.findViewById<TextView>(R.id.tvDiagFpsValue)
+        val tvDiagFpsTarget = dialogView.findViewById<TextView>(R.id.tvDiagFpsTarget)
+        val tvPpsValue = dialogView.findViewById<TextView>(R.id.tvDiagPpsValue)
+        val tvTotalPackets = dialogView.findViewById<TextView>(R.id.tvDiagTotalPackets)
+        val layoutDeviceList = dialogView.findViewById<LinearLayout>(R.id.layoutDiagDeviceList)
+        val chart = dialogView.findViewById<PerformanceHistoryChartView>(R.id.chartThroughputHistory)
+        val tvChartFpsLegend = dialogView.findViewById<TextView>(R.id.tvChartFpsLegend)
+        val tvChartPpsLegend = dialogView.findViewById<TextView>(R.id.tvChartPpsLegend)
+
+        val btnWindow5m = dialogView.findViewById<View>(R.id.btnWindow5m)
+        val btnWindow15m = dialogView.findViewById<View>(R.id.btnWindow15m)
+        val btnWindow30m = dialogView.findViewById<View>(R.id.btnWindow30m)
+        val btnWindow1h = dialogView.findViewById<View>(R.id.btnWindow1h)
+        val btnWindow3h = dialogView.findViewById<View>(R.id.btnWindow3h)
+
+        btnWindow5m.isSelected = (windowSec == 300)
+        btnWindow15m.isSelected = (windowSec == 900)
+        btnWindow30m.isSelected = (windowSec == 1800)
+        btnWindow1h.isSelected = (windowSec == 3600)
+        btnWindow3h.isSelected = (windowSec == 10800)
+
+        tvFpsValue.text = "${stats.fps} FPS"
+        tvDiagFpsTarget.text = "Target: ${stats.targetFps.coerceAtLeast(1)} FPS"
+
+        tvPpsValue.text = "${stats.pps} pkts/s"
+        tvTotalPackets.text = String.format("%,d packets sent this session", stats.totalPackets)
+
+        val history = AmbientCaptureService.getHistorySnapshot(windowSec)
+        chart.setData(history, windowSec, config.calibration.fps, config.enabledDevices.size)
+
+        val summary = chart.getSummaryStats()
+        tvChartFpsLegend.text = "Capture FPS: Avg %.1f • Peak %d".format(summary.avgFps, summary.peakFps)
+        tvChartPpsLegend.text = "UDP PPS: Avg %.1f • Peak %d".format(summary.avgPps, summary.peakPps)
+
+        layoutDeviceList.removeAllViews()
+        val devices = if (stats.deviceStats.isNotEmpty()) {
+            stats.deviceStats
+        } else {
+            config.enabledDevices.map { dev ->
+                DeviceThroughputStats(
+                    deviceId = dev.id,
+                    deviceName = dev.name,
+                    ip = dev.ip,
+                    pps = 0,
+                    totalPackets = 0L
+                )
+            }
+        }
+
+        if (devices.isEmpty()) {
+            val emptyTv = TextView(this).apply {
+                text = "No enabled devices found"
+                setTextColor(Color.parseColor("#94A3B8"))
+                textSize = 12f
+                setPadding(0, 6, 0, 6)
+            }
+            layoutDeviceList.addView(emptyTv)
+        } else {
+            for (dev in devices) {
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    setPadding(0, 4, 0, 4)
+                }
+                val nameTv = TextView(this).apply {
+                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                    text = "${dev.deviceName} (${dev.ip})"
+                    setTextColor(Color.parseColor("#F8FAFC"))
+                    textSize = 12f
+                }
+                val rateTv = TextView(this).apply {
+                    text = "${dev.pps} pkts/s  (%,d total)".format(dev.totalPackets)
+                    setTextColor(Color.parseColor("#38BDF8"))
+                    textSize = 12f
+                    textAlignment = View.TEXT_ALIGNMENT_VIEW_END
+                }
+                row.addView(nameTv)
+                row.addView(rateTv)
+                layoutDeviceList.addView(row)
+            }
+        }
+    }
+
+    private fun showThroughputDetailsDialog() {
+        val stats = AmbientCaptureService.latestStats ?: ThroughputStats(
+            fps = 0,
+            targetFps = config.calibration.fps,
+            pps = 0,
+            totalPackets = 0L,
+            deviceStats = emptyList()
+        )
+
+        val dialogView = layoutInflater.inflate(R.layout.dialog_throughput_details, null)
+        currentDialogView = dialogView
+
+        val dialog = androidx.appcompat.app.AlertDialog.Builder(this)
+            .setView(dialogView)
+            .create()
+
+        dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        throughputDialog = dialog
+
+        val btnClose = dialogView.findViewById<View>(R.id.btnDismissThroughputDialog)
+        val btnWindow5m = dialogView.findViewById<View>(R.id.btnWindow5m)
+        val btnWindow15m = dialogView.findViewById<View>(R.id.btnWindow15m)
+        val btnWindow30m = dialogView.findViewById<View>(R.id.btnWindow30m)
+        val btnWindow1h = dialogView.findViewById<View>(R.id.btnWindow1h)
+        val btnWindow3h = dialogView.findViewById<View>(R.id.btnWindow3h)
+
+        btnWindow5m.setOnClickListener {
+            selectedWindowSeconds = 300
+            val cur = AmbientCaptureService.latestStats ?: stats
+            refreshDialogTelemetry(dialogView, cur, 300)
+        }
+        btnWindow15m.setOnClickListener {
+            selectedWindowSeconds = 900
+            val cur = AmbientCaptureService.latestStats ?: stats
+            refreshDialogTelemetry(dialogView, cur, 900)
+        }
+        btnWindow30m.setOnClickListener {
+            selectedWindowSeconds = 1800
+            val cur = AmbientCaptureService.latestStats ?: stats
+            refreshDialogTelemetry(dialogView, cur, 1800)
+        }
+        btnWindow1h.setOnClickListener {
+            selectedWindowSeconds = 3600
+            val cur = AmbientCaptureService.latestStats ?: stats
+            refreshDialogTelemetry(dialogView, cur, 3600)
+        }
+        btnWindow3h.setOnClickListener {
+            selectedWindowSeconds = 10800
+            val cur = AmbientCaptureService.latestStats ?: stats
+            refreshDialogTelemetry(dialogView, cur, 10800)
+        }
+
+        refreshDialogTelemetry(dialogView, stats, selectedWindowSeconds)
+
+        btnClose.setOnClickListener {
+            dialog.dismiss()
+        }
+
+        dialog.setOnDismissListener {
+            currentDialogView = null
+            throughputDialog = null
+        }
+
+        dialog.show()
+        btnClose.requestFocus()
     }
 }

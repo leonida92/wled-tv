@@ -23,6 +23,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
 import android.util.DisplayMetrics
 import android.util.Log
@@ -31,7 +32,10 @@ import android.view.WindowManager
 import androidx.core.app.NotificationCompat
 import com.wled.tv.R
 import com.wled.tv.data.PreferencesRepository
+import com.wled.tv.model.DeviceThroughputStats
 import com.wled.tv.model.DeviceType
+import com.wled.tv.model.ThroughputHistoryPoint
+import com.wled.tv.model.ThroughputStats
 import com.wled.tv.model.WledConfig
 import com.wled.tv.model.WledDevice
 import com.wled.tv.network.WledHttpClient
@@ -64,6 +68,7 @@ class AmbientCaptureService : Service() {
     private val udpSender = WledUdpSender()
     private val httpClient = WledHttpClient()
     private val serviceScope = CoroutineScope(Dispatchers.IO)
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     private val deviceBuffers = HashMap<String, ByteArray>()
     private var isCapturing = AtomicBoolean(false)
@@ -73,6 +78,67 @@ class AmbientCaptureService : Service() {
     private var lastLivePreviewTime = 0L
     private var captureWidth = 320
     private var captureHeight = 180
+
+    private var statsFramesInCurrentSecond = 0
+    private var statsPacketsInCurrentSecond = 0
+    private var statsTotalPackets = 0L
+    private val statsPerDevicePacketsInSecond = HashMap<String, Int>()
+    private val statsPerDeviceTotalPackets = HashMap<String, Long>()
+    private var lastStatsCalculationTime = 0L
+
+    private fun recordPacketSent(deviceId: String) {
+        statsPacketsInCurrentSecond++
+        statsTotalPackets++
+        statsPerDevicePacketsInSecond[deviceId] = (statsPerDevicePacketsInSecond[deviceId] ?: 0) + 1
+        statsPerDeviceTotalPackets[deviceId] = (statsPerDeviceTotalPackets[deviceId] ?: 0L) + 1L
+    }
+
+    private fun checkAndEmitThroughputStats(now: Long) {
+        if (lastStatsCalculationTime == 0L) {
+            lastStatsCalculationTime = now
+            return
+        }
+        val elapsed = now - lastStatsCalculationTime
+        if (elapsed >= 1000L) {
+            val actualFps = ((statsFramesInCurrentSecond * 1000L) / elapsed).toInt()
+            val actualPps = ((statsPacketsInCurrentSecond * 1000L) / elapsed).toInt()
+            val targetFps = config.calibration.fps.coerceIn(15, 60)
+
+            val deviceStatsList = config.enabledDevices.map { dev ->
+                val devPps = (((statsPerDevicePacketsInSecond[dev.id] ?: 0) * 1000L) / elapsed).toInt()
+                val devTotal = statsPerDeviceTotalPackets[dev.id] ?: 0L
+                DeviceThroughputStats(
+                    deviceId = dev.id,
+                    deviceName = dev.name,
+                    ip = dev.ip,
+                    pps = devPps,
+                    totalPackets = devTotal
+                )
+            }
+
+            val stats = ThroughputStats(
+                fps = actualFps,
+                targetFps = targetFps,
+                pps = actualPps,
+                totalPackets = statsTotalPackets,
+                deviceStats = deviceStatsList
+            )
+            latestStats = stats
+
+            recordHistoryPoint(ThroughputHistoryPoint(timestamp = now, fps = actualFps, pps = actualPps))
+
+            if (throughputListener != null) {
+                mainHandler.post {
+                    throughputListener?.onThroughputStatsUpdated(stats)
+                }
+            }
+
+            statsFramesInCurrentSecond = 0
+            statsPacketsInCurrentSecond = 0
+            statsPerDevicePacketsInSecond.clear()
+            lastStatsCalculationTime = now
+        }
+    }
 
     private val keepaliveRunnable = object : Runnable {
         override fun run() {
@@ -101,11 +167,13 @@ class AmbientCaptureService : Service() {
                             ledCount = leds,
                             colorOrder = device.calibration.colorOrder
                         )
+                        recordPacketSent(device.id)
                     }
                 }
                 lastSendTime = now
             }
 
+            checkAndEmitThroughputStats(now)
             backgroundHandler?.postDelayed(this, 500L)
         }
     }
@@ -340,6 +408,14 @@ class AmbientCaptureService : Service() {
                 backgroundHandler
             )
 
+            statsFramesInCurrentSecond = 0
+            statsPacketsInCurrentSecond = 0
+            statsTotalPackets = 0L
+            statsPerDevicePacketsInSecond.clear()
+            statsPerDeviceTotalPackets.clear()
+            lastStatsCalculationTime = System.currentTimeMillis()
+            latestStats = null
+
             // Start heartbeat keepalive to maintain ambient lighting on static/paused screens
             backgroundHandler?.postDelayed(keepaliveRunnable, 500L)
 
@@ -380,6 +456,7 @@ class AmbientCaptureService : Service() {
                 return@setOnImageAvailableListener
             }
             lastFrameTime = now
+            statsFramesInCurrentSecond++
 
             val readyToSendDevices = mutableListOf<WledDevice>()
 
@@ -433,6 +510,7 @@ class AmbientCaptureService : Service() {
                     ledCount = leds,
                     colorOrder = device.calibration.colorOrder
                 )
+                recordPacketSent(device.id)
 
                 if (liveFrameListener != null && (now - lastLivePreviewTime >= 50L)) {
                     lastLivePreviewTime = now
@@ -442,6 +520,7 @@ class AmbientCaptureService : Service() {
             }
 
             lastSendTime = now
+            checkAndEmitThroughputStats(now)
         }, backgroundHandler)
     }
 
@@ -577,6 +656,10 @@ class AmbientCaptureService : Service() {
         }
 
         blackoutAndPowerOffLeds()
+        statsFramesInCurrentSecond = 0
+        statsPacketsInCurrentSecond = 0
+        statsPerDevicePacketsInSecond.clear()
+        latestStats = null
         Log.i(TAG, "Ambient screen capture stopped")
     }
 
@@ -668,6 +751,10 @@ class AmbientCaptureService : Service() {
         fun onStateChanged(running: Boolean)
     }
 
+    interface ThroughputListener {
+        fun onThroughputStatsUpdated(stats: ThroughputStats)
+    }
+
     companion object {
         private const val TAG = "AmbientCaptureService"
         const val CHANNEL_ID = "wled_ambient_capture_channel"
@@ -687,5 +774,35 @@ class AmbientCaptureService : Service() {
         var currentServiceInstance: AmbientCaptureService? = null
         var liveFrameListener: LiveFrameListener? = null
         var stateListener: ServiceStateListener? = null
+        var throughputListener: ThroughputListener? = null
+
+        @Volatile
+        var latestStats: ThroughputStats? = null
+
+        private const val MAX_HISTORY_SECONDS = 10800
+        private val historyLock = Any()
+        private val historyBuffer = ArrayDeque<ThroughputHistoryPoint>(MAX_HISTORY_SECONDS)
+
+        fun recordHistoryPoint(point: ThroughputHistoryPoint) {
+            synchronized(historyLock) {
+                if (historyBuffer.size >= MAX_HISTORY_SECONDS) {
+                    historyBuffer.removeFirst()
+                }
+                historyBuffer.addLast(point)
+            }
+        }
+
+        fun getHistorySnapshot(windowSeconds: Int = MAX_HISTORY_SECONDS): List<ThroughputHistoryPoint> {
+            val cutoff = System.currentTimeMillis() - (windowSeconds * 1000L)
+            return synchronized(historyLock) {
+                historyBuffer.filter { it.timestamp >= cutoff }
+            }
+        }
+
+        fun clearHistory() {
+            synchronized(historyLock) {
+                historyBuffer.clear()
+            }
+        }
     }
 }
