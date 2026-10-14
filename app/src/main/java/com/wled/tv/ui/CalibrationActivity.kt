@@ -266,13 +266,11 @@ class CalibrationActivity : AppCompatActivity() {
                     frame[idx + 2] = b
                 }
 
-                udpSender.sendDrgbFrame(
-                    ip = dev.ip,
-                    port = dev.port,
-                    timeoutSeconds = 5,
+                udpSender.sendDeviceFrame(
+                    device = dev,
                     rgb = frame,
                     ledCount = leds,
-                    colorOrder = c.colorOrder
+                    timeoutSeconds = 5
                 )
                 delay(100)
             }

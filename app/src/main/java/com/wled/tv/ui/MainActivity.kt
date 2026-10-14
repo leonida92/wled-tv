@@ -7,7 +7,10 @@ import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.media.projection.MediaProjectionManager
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.view.LayoutInflater
 import android.view.View
 import android.widget.FrameLayout
@@ -37,6 +40,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 
 class MainActivity : AppCompatActivity(),
@@ -60,6 +64,8 @@ class MainActivity : AppCompatActivity(),
     private lateinit var viewThroughputDot: View
     private lateinit var tvThroughputText: TextView
 
+    private lateinit var btnToggleOverlay: LinearLayout
+    private lateinit var tvToggleOverlayText: TextView
     private lateinit var btnTestStrip: LinearLayout
     private lateinit var btnSystemSettings: LinearLayout
     private lateinit var tvPreviewView: TvPerimeterPreviewView
@@ -96,6 +102,15 @@ class MainActivity : AppCompatActivity(),
         renderDeviceDock()
         updateUiState()
 
+        if (intent.getBooleanExtra("EXTRA_AUTO_START_TRIGGERED", false) && !AmbientCaptureService.isRunning) {
+            intent.removeExtra("EXTRA_AUTO_START_TRIGGERED")
+            requestScreenCapture()
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
         if (intent.getBooleanExtra("EXTRA_AUTO_START_TRIGGERED", false) && !AmbientCaptureService.isRunning) {
             intent.removeExtra("EXTRA_AUTO_START_TRIGGERED")
             requestScreenCapture()
@@ -154,6 +169,8 @@ class MainActivity : AppCompatActivity(),
         viewThroughputDot = findViewById(R.id.viewThroughputDot)
         tvThroughputText = findViewById(R.id.tvThroughputText)
 
+        btnToggleOverlay = findViewById(R.id.btnToggleOverlay)
+        tvToggleOverlayText = findViewById(R.id.tvToggleOverlayText)
         btnTestStrip = findViewById(R.id.btnTestStrip)
         btnSystemSettings = findViewById(R.id.btnSystemSettings)
         tvPreviewView = findViewById(R.id.tvPreviewView)
@@ -173,6 +190,10 @@ class MainActivity : AppCompatActivity(),
 
         btnThroughputPill.setOnClickListener {
             showThroughputDetailsDialog()
+        }
+
+        btnToggleOverlay.setOnClickListener {
+            handleToggleOverlay()
         }
 
         btnTestStrip.setOnClickListener {
@@ -292,13 +313,11 @@ class MainActivity : AppCompatActivity(),
                 val totalLeds = updatedDevice.totalLeds
                 if (totalLeds > 0) {
                     val blackBuffer = ByteArray(totalLeds * 3)
-                    udpSender.sendDrgbFrame(
-                        ip = updatedDevice.ip,
-                        port = updatedDevice.port,
-                        timeoutSeconds = 2,
+                    udpSender.sendDeviceFrame(
+                        device = updatedDevice,
                         rgb = blackBuffer,
                         ledCount = totalLeds,
-                        colorOrder = updatedDevice.calibration.colorOrder
+                        timeoutSeconds = 2
                     )
                 }
                 httpClient.turnOff(updatedDevice.ip)
@@ -325,6 +344,50 @@ class MainActivity : AppCompatActivity(),
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    private fun handleToggleOverlay() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+            AlertDialog.Builder(this)
+                .setTitle("Overlay Permission Required")
+                .setMessage("To display the sampling box overlay over movies and other apps, Android TV requires 'Display over other apps' permission.\n\nYou can also grant it via ADB:\nadb shell appops set com.wled.tv SYSTEM_ALERT_WINDOW allow")
+                .setPositiveButton("Open Settings") { _, _ ->
+                    try {
+                        val intent = Intent(
+                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                            Uri.parse("package:$packageName")
+                        )
+                        startActivity(intent)
+                    } catch (e: Exception) {
+                        Toast.makeText(this, "Could not open overlay settings. Please grant via ADB.", Toast.LENGTH_LONG).show()
+                    }
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+            return
+        }
+
+        if (!AmbientCaptureService.isRunning) {
+            Toast.makeText(this, "Start ambient capture first to view overlay", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val service = AmbientCaptureService.currentServiceInstance
+        if (service != null) {
+            service.toggleSamplingOverlay()
+            updateOverlayButtonState()
+        }
+    }
+
+    private fun updateOverlayButtonState() {
+        val isShowing = AmbientCaptureService.currentServiceInstance?.isSamplingOverlayShowing() == true
+        if (isShowing) {
+            tvToggleOverlayText.text = "Hide Overlay"
+            btnToggleOverlay.isSelected = true
+        } else {
+            tvToggleOverlayText.text = "Overlay"
+            btnToggleOverlay.isSelected = false
+        }
     }
 
     private fun toggleTestPattern() {
@@ -360,13 +423,11 @@ class MainActivity : AppCompatActivity(),
                         testBuffer[idx + 2] = Color.blue(rgb).toByte()
                     }
 
-                    udpSender.sendDrgbFrame(
-                        ip = dev.ip,
-                        port = dev.port,
-                        timeoutSeconds = 2,
+                    udpSender.sendDeviceFrame(
+                        device = dev,
                         rgb = testBuffer,
                         ledCount = leds,
-                        colorOrder = dev.calibration.colorOrder
+                        timeoutSeconds = 2
                     )
 
                     launch(Dispatchers.Main) {
@@ -399,13 +460,11 @@ class MainActivity : AppCompatActivity(),
                 val leds = dev.totalLeds
                 if (leds > 0) {
                     val blackBuffer = ByteArray(leds * 3)
-                    udpSender.sendDrgbFrame(
-                        ip = dev.ip,
-                        port = dev.port,
-                        timeoutSeconds = 1,
+                    udpSender.sendDeviceFrame(
+                        device = dev,
                         rgb = blackBuffer,
                         ledCount = leds,
-                        colorOrder = dev.calibration.colorOrder
+                        timeoutSeconds = 1
                     )
                 }
             }
@@ -453,15 +512,23 @@ class MainActivity : AppCompatActivity(),
         }
         val totalEnabled = config.enabledDevices.size
 
+        val hasAnyPingResults = config.enabledDevices.any { deviceReachabilityMap.containsKey(it.id) }
+
         if (running) {
             btnPower.setBackgroundResource(R.drawable.bg_power_button_on)
             tvPowerText.text = getString(R.string.btn_stop_mirror)
             tvPowerText.setTextColor(Color.parseColor("#F87171"))
             ivPowerIcon.imageTintList = ColorStateList.valueOf(Color.parseColor("#EF4444"))
 
-            if (pingableActiveCount > 0) {
+            if (AmbientCaptureService.isDrmActive) {
+                viewStatusDot.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#F59E0B"))
+                tvStatusTitle.text = "Widevine L1 DRM Active"
+            } else if (pingableActiveCount > 0) {
                 viewStatusDot.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#00E676"))
                 tvStatusTitle.text = if (pingableActiveCount == 1) "Active" else "Active ($pingableActiveCount)"
+            } else if (!hasAnyPingResults) {
+                viewStatusDot.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#00E5FF"))
+                tvStatusTitle.text = "Active"
             } else {
                 viewStatusDot.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#EF4444"))
                 tvStatusTitle.text = "No Light Found"
@@ -478,11 +545,15 @@ class MainActivity : AppCompatActivity(),
             } else if (pingableActiveCount > 0) {
                 viewStatusDot.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#00E676"))
                 tvStatusTitle.text = if (pingableActiveCount == 1) "Ready (1)" else "Ready ($pingableActiveCount)"
+            } else if (!hasAnyPingResults) {
+                viewStatusDot.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#64748B"))
+                tvStatusTitle.text = "Checking Lights..."
             } else {
                 viewStatusDot.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#EF4444"))
                 tvStatusTitle.text = "No Light Found"
             }
         }
+        updateOverlayButtonState()
     }
 
     private fun startPingPolling() {
@@ -535,6 +606,7 @@ class MainActivity : AppCompatActivity(),
         runOnUiThread {
             if (AmbientCaptureService.isRunning) {
                 updateThroughputUi(stats)
+                updateUiState()
                 val dialogView = currentDialogView
                 if (throughputDialog?.isShowing == true && dialogView != null) {
                     refreshDialogTelemetry(dialogView, stats, selectedWindowSeconds)
@@ -551,6 +623,9 @@ class MainActivity : AppCompatActivity(),
     }
 
     private fun refreshDialogTelemetry(dialogView: View, stats: ThroughputStats, windowSec: Int) {
+        val cardDrmNotice = dialogView.findViewById<View>(R.id.cardDrmNotice)
+        cardDrmNotice?.visibility = if (AmbientCaptureService.isDrmActive) View.VISIBLE else View.GONE
+
         val tvFpsValue = dialogView.findViewById<TextView>(R.id.tvDiagFpsValue)
         val tvDiagFpsTarget = dialogView.findViewById<TextView>(R.id.tvDiagFpsTarget)
         val tvPpsValue = dialogView.findViewById<TextView>(R.id.tvDiagPpsValue)
@@ -576,7 +651,7 @@ class MainActivity : AppCompatActivity(),
         tvDiagFpsTarget.text = "Target: ${stats.targetFps.coerceAtLeast(1)} FPS"
 
         tvPpsValue.text = "${stats.pps} pkts/s"
-        tvTotalPackets.text = String.format("%,d packets sent this session", stats.totalPackets)
+        tvTotalPackets.text = String.format(Locale.US, "%,d packets sent this session", stats.totalPackets)
 
         val history = AmbientCaptureService.getHistorySnapshot(windowSec)
         chart.setData(history, windowSec, config.calibration.fps, config.enabledDevices.size)

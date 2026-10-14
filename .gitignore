@@ -62,3 +62,7 @@ secrets.properties
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Agent state and context files
+PROJECT_STATE.md
+.agent-context.md

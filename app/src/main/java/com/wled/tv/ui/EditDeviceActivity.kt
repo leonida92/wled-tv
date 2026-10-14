@@ -21,6 +21,7 @@ import com.wled.tv.data.PreferencesRepository
 import com.wled.tv.model.Corner
 import com.wled.tv.model.DeviceType
 import com.wled.tv.model.Direction
+import com.wled.tv.model.StreamingProtocol
 import com.wled.tv.model.WledConfig
 import com.wled.tv.model.WledDevice
 import com.wled.tv.network.WledHttpClient
@@ -48,6 +49,10 @@ class EditDeviceActivity : AppCompatActivity() {
     private lateinit var etDeviceIp: EditText
     private lateinit var btnPingDevice: Button
     private lateinit var tvPingStatus: TextView
+
+    private lateinit var btnSelectProtocol: Button
+    private lateinit var etDevicePort: EditText
+    private lateinit var btnSelectRgbw: Button
 
     private lateinit var btnSelectFixtureMode: Button
     private lateinit var tvPositionHeader: TextView
@@ -152,6 +157,10 @@ class EditDeviceActivity : AppCompatActivity() {
         btnPingDevice = findViewById(R.id.btnPingDevice)
         tvPingStatus = findViewById(R.id.tvPingStatus)
 
+        btnSelectProtocol = findViewById(R.id.btnSelectProtocol)
+        etDevicePort = findViewById(R.id.etDevicePort)
+        btnSelectRgbw = findViewById(R.id.btnSelectRgbw)
+
         btnSelectFixtureMode = findViewById(R.id.btnSelectFixtureMode)
         tvPositionHeader = findViewById(R.id.tvPositionHeader)
         btnSelectPosition = findViewById(R.id.btnSelectPosition)
@@ -175,6 +184,45 @@ class EditDeviceActivity : AppCompatActivity() {
             identifyDevice()
         }
 
+        btnSelectProtocol.setOnClickListener {
+            val protocols = StreamingProtocol.entries
+            val names = protocols.map { "${it.displayName} (Port ${it.defaultPort})" }.toTypedArray()
+            AlertDialog.Builder(this)
+                .setTitle("Select Streaming Protocol")
+                .setItems(names) { _, which ->
+                    val chosen = protocols[which]
+                    val oldPort = etDevicePort.text.toString().toIntOrNull() ?: currentDevice.port
+                    val isOldDefault = (oldPort == currentDevice.protocol.defaultPort)
+                    val newPort = if (isOldDefault) chosen.defaultPort else oldPort
+
+                    currentDevice = currentDevice.copy(protocol = chosen, port = newPort)
+                    etDevicePort.setText(newPort.toString())
+                    populateUi()
+                }
+                .show()
+        }
+
+        btnSelectRgbw.setOnClickListener {
+            val options = arrayOf(
+                "RGB Standard (3-Channel: WS2812B / WS2811 / WS2815)",
+                "SK6812 RGBW (Auto White Subtract - High CRI & Power Saving)",
+                "SK6812 RGBW (Auto White Add - Brighter Ambience)",
+                "SK6812 RGBW (White Off / WLED Internal Handling)"
+            )
+            AlertDialog.Builder(this)
+                .setTitle("Select Color Channel / RGBW Mode")
+                .setItems(options) { _, which ->
+                    currentDevice = when (which) {
+                        1 -> currentDevice.copy(calibration = currentDevice.calibration.copy(isRgbw = true, rgbwMode = "AUTO_SUBTRACT"))
+                        2 -> currentDevice.copy(calibration = currentDevice.calibration.copy(isRgbw = true, rgbwMode = "AUTO_ADD"))
+                        3 -> currentDevice.copy(calibration = currentDevice.calibration.copy(isRgbw = true, rgbwMode = "OFF"))
+                        else -> currentDevice.copy(calibration = currentDevice.calibration.copy(isRgbw = false, rgbwMode = "AUTO_SUBTRACT"))
+                    }
+                    populateUi()
+                }
+                .show()
+        }
+
         btnPingDevice.setOnClickListener {
             val ip = etDeviceIp.text.toString().trim()
             if (ip.isBlank()) {
@@ -188,17 +236,33 @@ class EditDeviceActivity : AppCompatActivity() {
 
             lifecycleScope.launch {
                 val start = System.currentTimeMillis()
-                val reachable = withContext(Dispatchers.IO) { httpClient.checkConnection(ip) }
+                val info = withContext(Dispatchers.IO) { httpClient.fetchDeviceInfo(ip) }
                 val duration = System.currentTimeMillis() - start
                 btnPingDevice.isEnabled = true
-                if (reachable) {
-                    tvPingStatus.text = "Online (${duration}ms response)"
+                if (info != null) {
+                    val rgbwStr = if (info.isRgbw) " • RGBW detected" else ""
+                    tvPingStatus.text = "Online (${duration}ms) • WLED v${info.version} • ${info.ledCount} LEDs$rgbwStr"
                     tvPingStatus.setTextColor(Color.parseColor("#00E676"))
-                    Toast.makeText(this@EditDeviceActivity, "WLED Online ($duration ms)", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@EditDeviceActivity, "WLED v${info.version} Online ($duration ms)", Toast.LENGTH_SHORT).show()
+
+                    if (info.isRgbw && !currentDevice.calibration.isRgbw) {
+                        currentDevice = currentDevice.copy(
+                            calibration = currentDevice.calibration.copy(isRgbw = true, rgbwMode = "AUTO_SUBTRACT")
+                        )
+                        Toast.makeText(this@EditDeviceActivity, "Detected SK6812 RGBW strip! Enabled RGBW mode.", Toast.LENGTH_LONG).show()
+                        populateUi()
+                    }
                 } else {
-                    tvPingStatus.text = "Unreachable (Check IP / Wi-Fi)"
-                    tvPingStatus.setTextColor(Color.parseColor("#F87171"))
-                    Toast.makeText(this@EditDeviceActivity, "WLED Unreachable at $ip", Toast.LENGTH_SHORT).show()
+                    val reachable = withContext(Dispatchers.IO) { httpClient.checkConnection(ip) }
+                    if (reachable) {
+                        tvPingStatus.text = "Online (${duration}ms response)"
+                        tvPingStatus.setTextColor(Color.parseColor("#00E676"))
+                        Toast.makeText(this@EditDeviceActivity, "WLED Online ($duration ms)", Toast.LENGTH_SHORT).show()
+                    } else {
+                        tvPingStatus.text = "Unreachable (Check IP / Wi-Fi)"
+                        tvPingStatus.setTextColor(Color.parseColor("#F87171"))
+                        Toast.makeText(this@EditDeviceActivity, "WLED Unreachable at $ip", Toast.LENGTH_SHORT).show()
+                    }
                 }
             }
         }
@@ -355,7 +419,7 @@ class EditDeviceActivity : AppCompatActivity() {
                     hideKeyboard(etDeviceIp)
                     when (keyCode) {
                         KeyEvent.KEYCODE_DPAD_UP -> etDeviceName.requestFocus()
-                        KeyEvent.KEYCODE_DPAD_DOWN -> btnSelectFixtureMode.requestFocus()
+                        KeyEvent.KEYCODE_DPAD_DOWN -> btnSelectProtocol.requestFocus()
                         KeyEvent.KEYCODE_DPAD_RIGHT -> btnPingDevice.requestFocus()
                         KeyEvent.KEYCODE_DPAD_LEFT -> { /* Keep focus without cursor stepping */ }
                     }
@@ -378,7 +442,7 @@ class EditDeviceActivity : AppCompatActivity() {
                     when (keyCode) {
                         KeyEvent.KEYCODE_DPAD_LEFT -> etDeviceIp.requestFocus()
                         KeyEvent.KEYCODE_DPAD_UP -> etDeviceName.requestFocus()
-                        KeyEvent.KEYCODE_DPAD_DOWN -> btnSelectFixtureMode.requestFocus()
+                        KeyEvent.KEYCODE_DPAD_DOWN -> etDevicePort.requestFocus()
                         KeyEvent.KEYCODE_DPAD_RIGHT -> {
                             if (cardCalibrationSettings.visibility == View.VISIBLE) {
                                 cardCalibrationSettings.requestFocus()
@@ -393,12 +457,79 @@ class EditDeviceActivity : AppCompatActivity() {
             false
         }
 
+        // D-Pad Navigation for btnSelectProtocol
+        btnSelectProtocol.setOnKeyListener { _, keyCode, event ->
+            if (keyCode in dpadNavKeys) {
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    when (keyCode) {
+                        KeyEvent.KEYCODE_DPAD_UP -> etDeviceIp.requestFocus()
+                        KeyEvent.KEYCODE_DPAD_DOWN -> btnSelectRgbw.requestFocus()
+                        KeyEvent.KEYCODE_DPAD_RIGHT -> etDevicePort.requestFocus()
+                        KeyEvent.KEYCODE_DPAD_LEFT -> { /* Stay */ }
+                    }
+                }
+                return@setOnKeyListener true
+            }
+            false
+        }
+
+        // D-Pad Navigation for etDevicePort
+        etDevicePort.setOnKeyListener { _, keyCode, event ->
+            if (keyCode in dpadNavKeys) {
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    hideKeyboard(etDevicePort)
+                    when (keyCode) {
+                        KeyEvent.KEYCODE_DPAD_UP -> btnPingDevice.requestFocus()
+                        KeyEvent.KEYCODE_DPAD_DOWN -> btnSelectRgbw.requestFocus()
+                        KeyEvent.KEYCODE_DPAD_LEFT -> btnSelectProtocol.requestFocus()
+                        KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                            if (cardCalibrationSettings.visibility == View.VISIBLE) {
+                                cardCalibrationSettings.requestFocus()
+                            } else if (cardPerimeterSettings.visibility == View.VISIBLE) {
+                                cardPerimeterSettings.requestFocus()
+                            }
+                        }
+                    }
+                }
+                return@setOnKeyListener true
+            }
+            if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER || keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER) {
+                if (event.action == KeyEvent.ACTION_UP) {
+                    showKeyboard(etDevicePort)
+                }
+                return@setOnKeyListener true
+            }
+            false
+        }
+
+        // D-Pad Navigation for btnSelectRgbw
+        btnSelectRgbw.setOnKeyListener { _, keyCode, event ->
+            if (keyCode in dpadNavKeys) {
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    when (keyCode) {
+                        KeyEvent.KEYCODE_DPAD_UP -> btnSelectProtocol.requestFocus()
+                        KeyEvent.KEYCODE_DPAD_DOWN -> btnSelectFixtureMode.requestFocus()
+                        KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                            if (cardCalibrationSettings.visibility == View.VISIBLE) {
+                                cardCalibrationSettings.requestFocus()
+                            } else if (cardPerimeterSettings.visibility == View.VISIBLE) {
+                                cardPerimeterSettings.requestFocus()
+                            }
+                        }
+                        KeyEvent.KEYCODE_DPAD_LEFT -> { /* Stay */ }
+                    }
+                }
+                return@setOnKeyListener true
+            }
+            false
+        }
+
         // D-Pad Navigation for btnSelectFixtureMode
         btnSelectFixtureMode.setOnKeyListener { _, keyCode, event ->
             if (keyCode in dpadNavKeys) {
                 if (event.action == KeyEvent.ACTION_DOWN) {
                     when (keyCode) {
-                        KeyEvent.KEYCODE_DPAD_UP -> etDeviceIp.requestFocus()
+                        KeyEvent.KEYCODE_DPAD_UP -> btnSelectRgbw.requestFocus()
                         KeyEvent.KEYCODE_DPAD_DOWN -> {
                             if (btnSelectPosition.visibility == View.VISIBLE) {
                                 btnSelectPosition.requestFocus()
@@ -569,6 +700,16 @@ class EditDeviceActivity : AppCompatActivity() {
         btnDeleteDevice.visibility = if (isNewDevice) View.GONE else View.VISIBLE
         etDeviceName.setText(currentDevice.name)
         etDeviceIp.setText(currentDevice.ip)
+        etDevicePort.setText(currentDevice.port.toString())
+
+        btnSelectProtocol.text = "${currentDevice.protocol.displayName} (Port ${currentDevice.port})"
+
+        btnSelectRgbw.text = when {
+            !currentDevice.calibration.isRgbw -> "RGB (3-Channel Standard)"
+            currentDevice.calibration.rgbwMode == "AUTO_SUBTRACT" -> "SK6812 RGBW (Auto Subtract)"
+            currentDevice.calibration.rgbwMode == "AUTO_ADD" -> "SK6812 RGBW (Auto Add)"
+            else -> "SK6812 RGBW (White Off)"
+        }
 
         val isArray = currentDevice.type == DeviceType.PERIMETER || currentDevice.totalLeds > 1
         if (isArray) {
@@ -604,17 +745,19 @@ class EditDeviceActivity : AppCompatActivity() {
 
         val c = currentDevice.calibration
         val briPct = ((c.maxBrightness / 255f) * 100).toInt()
+        val rgbwTag = if (c.isRgbw) "RGBW (${c.rgbwMode})" else "RGB"
         tvCalibrationSummary.text = String.format(
             Locale.US,
-            "Brightness %d%% • Order %s\nSaturation %.1fx • Smoothing %.2f",
-            briPct, c.colorOrder, c.saturation, c.smoothingFactor
+            "Brightness %d%% • %s • %s\nSaturation %.1fx • Smoothing %.2f",
+            briPct, c.colorOrder, rgbwTag, c.saturation, c.smoothingFactor
         )
     }
 
     private fun commitDraftChanges() {
         val name = etDeviceName.text.toString().trim().ifBlank { currentDevice.name }
         val ip = etDeviceIp.text.toString().trim().ifBlank { currentDevice.ip }
-        currentDevice = currentDevice.copy(name = name, ip = ip)
+        val port = etDevicePort.text.toString().trim().toIntOrNull() ?: currentDevice.port
+        currentDevice = currentDevice.copy(name = name, ip = ip, port = port)
 
         // Save temporary draft in config so child settings activity can inspect/modify it
         config = prefsRepo.loadConfig()
@@ -649,13 +792,11 @@ class EditDeviceActivity : AppCompatActivity() {
                 lifecycleScope.launch(Dispatchers.IO) {
                     val totalLeds = currentDevice.totalLeds
                     if (totalLeds > 0) {
-                        udpSender.sendDrgbFrame(
-                            currentDevice.ip,
-                            currentDevice.port,
-                            2,
-                            ByteArray(totalLeds * 3),
-                            totalLeds,
-                            currentDevice.calibration.colorOrder
+                        udpSender.sendDeviceFrame(
+                            device = currentDevice,
+                            rgb = ByteArray(totalLeds * 3),
+                            ledCount = totalLeds,
+                            timeoutSeconds = 2
                         )
                     }
                     httpClient.turnOff(currentDevice.ip)
@@ -675,12 +816,13 @@ class EditDeviceActivity : AppCompatActivity() {
     private fun saveAndFinish() {
         val name = etDeviceName.text.toString().trim().ifBlank { "Light" }
         val ip = etDeviceIp.text.toString().trim()
+        val port = etDevicePort.text.toString().trim().toIntOrNull() ?: currentDevice.protocol.defaultPort
         if (ip.isBlank()) {
             Toast.makeText(this, "Please enter a valid IP address", Toast.LENGTH_SHORT).show()
             return
         }
 
-        currentDevice = currentDevice.copy(name = name, ip = ip)
+        currentDevice = currentDevice.copy(name = name, ip = ip, port = port)
         config = prefsRepo.loadConfig()
 
         val finalConfig = if (config.devices.any { it.id == currentDevice.id }) {
@@ -711,22 +853,18 @@ class EditDeviceActivity : AppCompatActivity() {
 
             for (flash in 1..3) {
                 if (!isActive) break
-                udpSender.sendDrgbFrame(
-                    ip,
-                    currentDevice.port,
-                    timeoutSeconds = 2,
+                udpSender.sendDeviceFrame(
+                    device = currentDevice.copy(ip = ip),
                     rgb = whiteFrame,
                     ledCount = totalLeds,
-                    colorOrder = currentDevice.calibration.colorOrder
+                    timeoutSeconds = 2
                 )
                 delay(300)
-                udpSender.sendDrgbFrame(
-                    ip,
-                    currentDevice.port,
-                    timeoutSeconds = 2,
+                udpSender.sendDeviceFrame(
+                    device = currentDevice.copy(ip = ip),
                     rgb = blackFrame,
                     ledCount = totalLeds,
-                    colorOrder = currentDevice.calibration.colorOrder
+                    timeoutSeconds = 2
                 )
                 delay(300)
             }

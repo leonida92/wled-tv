@@ -4,7 +4,10 @@ import android.app.AlertDialog
 import android.content.Intent
 import android.content.res.ColorStateList
 import android.graphics.Color
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.view.KeyEvent
 import android.view.View
 import android.widget.LinearLayout
@@ -40,6 +43,11 @@ class SystemSettingsActivity : AppCompatActivity() {
     private lateinit var itemAutoStartSetting: LinearLayout
     private lateinit var tvSystemAutoStartValue: TextView
 
+    private lateinit var itemOverlaySetting: LinearLayout
+    private lateinit var tvOverlaySettingStatus: TextView
+
+    private lateinit var itemAdbPermissionSetting: LinearLayout
+
     private lateinit var itemCheckUpdateSetting: LinearLayout
     private lateinit var tvAppVersionSummary: TextView
     private lateinit var tvUpdateActionText: TextView
@@ -69,6 +77,11 @@ class SystemSettingsActivity : AppCompatActivity() {
 
         itemAutoStartSetting = findViewById(R.id.itemAutoStartSetting)
         tvSystemAutoStartValue = findViewById(R.id.tvSystemAutoStartValue)
+
+        itemOverlaySetting = findViewById(R.id.itemOverlaySetting)
+        tvOverlaySettingStatus = findViewById(R.id.tvOverlaySettingStatus)
+
+        itemAdbPermissionSetting = findViewById(R.id.itemAdbPermissionSetting)
 
         itemCheckUpdateSetting = findViewById(R.id.itemCheckUpdateSetting)
         tvAppVersionSummary = findViewById(R.id.tvAppVersionSummary)
@@ -110,7 +123,78 @@ class SystemSettingsActivity : AppCompatActivity() {
             } else false
         }
 
+        itemOverlaySetting.setOnClickListener {
+            showOverlayGuideDialog()
+        }
+
+        itemAdbPermissionSetting.setOnClickListener {
+            showAdbPermissionDialog()
+        }
+
         itemCheckUpdateSetting.setOnClickListener { performUpdateCheck() }
+    }
+
+    private fun showOverlayGuideDialog() {
+        val hasPerm = Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this)
+        val permStatus = if (hasPerm) "Permission Granted" else "Permission Required"
+
+        val msg = """
+Status: $permStatus
+
+To toggle the real-time sampling overlay while playing video or using other apps, configure your TV button remapper to send this broadcast intent:
+
+Action:
+com.wled.tv.ACTION_TOGGLE_OVERLAY
+
+Package:
+com.wled.tv
+
+ADB Shell Command:
+adb shell am broadcast -a com.wled.tv.ACTION_TOGGLE_OVERLAY -p com.wled.tv
+
+Grant Permission via ADB:
+adb shell appops set com.wled.tv SYSTEM_ALERT_WINDOW allow
+        """.trimIndent()
+
+        val builder = AlertDialog.Builder(this)
+            .setTitle("Real-Time Sampling Overlay")
+            .setMessage(msg)
+            .setPositiveButton("Close", null)
+
+        if (!hasPerm && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            builder.setNeutralButton("Open Settings") { _, _ ->
+                try {
+                    val intent = Intent(
+                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:$packageName")
+                    )
+                    startActivity(intent)
+                } catch (e: Exception) {
+                    Toast.makeText(this, "Settings screen not found. Use ADB command above.", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+
+        builder.show()
+    }
+
+    private fun showAdbPermissionDialog() {
+        val msg = """
+Android TV requires user consent every time screen projection starts.
+
+To permanently grant screen capture permission and enable 100% silent auto-start on TV boot (no remote dialogs), run this command once via ADB:
+
+adb shell appops set com.wled.tv PROJECT_MEDIA allow
+
+This setting persists across reboots. To revoke later:
+adb shell appops set com.wled.tv PROJECT_MEDIA default
+        """.trimIndent()
+
+        AlertDialog.Builder(this)
+            .setTitle("Silent Boot Auto-Start (ADB)")
+            .setMessage(msg)
+            .setPositiveButton("Close", null)
+            .show()
     }
 
     private fun cycleFps() {
@@ -164,6 +248,15 @@ class SystemSettingsActivity : AppCompatActivity() {
             tvSystemAutoStartValue.text = "Disabled"
             tvSystemAutoStartValue.setTextColor(Color.parseColor("#94A3B8"))
         }
+
+        val hasPerm = Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this)
+        tvOverlaySettingStatus.text = if (hasPerm) "Ready" else "Action Needed"
+        tvOverlaySettingStatus.setTextColor(Color.parseColor(if (hasPerm) "#00E5FF" else "#F59E0B"))
+    }
+
+    override fun onResume() {
+        super.onResume()
+        updateUiValues()
     }
 
 

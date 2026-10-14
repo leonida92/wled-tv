@@ -48,7 +48,7 @@ data class PerimeterConfig(
         get() = topLeds + rightLeds + bottomLeds + leftLeds
 
     fun getActiveAspectRatioPreset(): AspectRatioPreset {
-        for (preset in AspectRatioPreset.values()) {
+        for (preset in AspectRatioPreset.entries) {
             if (preset == AspectRatioPreset.CUSTOM) continue
             val diffT = Math.abs(topCrop - preset.topCrop)
             val diffB = Math.abs(bottomCrop - preset.bottomCrop)
@@ -79,7 +79,8 @@ data class PerimeterConfig(
 
         val effectiveDepth = getEffectiveDepth()
         val depthY = effectiveDepth * activeH
-        val depthX = effectiveDepth * activeW
+        // Aspect ratio correction (16:9): ensure equal pixel sampling depth in width and height
+        val depthX = (depthY * (9.0f / 16.0f)).coerceIn(0.02f, activeW * 0.40f)
 
         // 1. Compute physical edge arrays (each ordered clockwise)
         val topZones = ArrayList<RectF>(topLeds)

@@ -208,13 +208,11 @@ class DeviceManagerActivity : AppCompatActivity() {
                         val totalLeds = updatedDevice.totalLeds
                         if (totalLeds > 0) {
                             val blackFrame = ByteArray(totalLeds * 3)
-                            udpSender.sendDrgbFrame(
-                                ip = updatedDevice.ip,
-                                port = updatedDevice.port,
-                                timeoutSeconds = 2,
+                            udpSender.sendDeviceFrame(
+                                device = updatedDevice,
                                 rgb = blackFrame,
                                 ledCount = totalLeds,
-                                colorOrder = updatedDevice.calibration.colorOrder
+                                timeoutSeconds = 2
                             )
                         }
                         httpClient.turnOff(updatedDevice.ip)
@@ -250,7 +248,7 @@ class DeviceManagerActivity : AppCompatActivity() {
                             lifecycleScope.launch(Dispatchers.IO) {
                                 val totalLeds = device.totalLeds
                                 if (totalLeds > 0) {
-                                    udpSender.sendDrgbFrame(device.ip, device.port, 2, ByteArray(totalLeds * 3), totalLeds, device.calibration.colorOrder)
+                                    udpSender.sendDeviceFrame(device, ByteArray(totalLeds * 3), totalLeds, timeoutSeconds = 2)
                                 }
                                 httpClient.turnOff(device.ip)
                             }
@@ -275,9 +273,9 @@ class DeviceManagerActivity : AppCompatActivity() {
 
             for (flash in 1..3) {
                 if (!isActive) break
-                udpSender.sendDrgbFrame(device.ip, device.port, timeoutSeconds = 2, rgb = whiteFrame, ledCount = totalLeds, colorOrder = device.calibration.colorOrder)
+                udpSender.sendDeviceFrame(device, whiteFrame, totalLeds, timeoutSeconds = 2)
                 delay(300)
-                udpSender.sendDrgbFrame(device.ip, device.port, timeoutSeconds = 2, rgb = blackFrame, ledCount = totalLeds, colorOrder = device.calibration.colorOrder)
+                udpSender.sendDeviceFrame(device, blackFrame, totalLeds, timeoutSeconds = 2)
                 delay(300)
             }
             if (device.enabled) {

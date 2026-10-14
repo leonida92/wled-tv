@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="660dp"
     android:layout_height="wrap_content"
@@ -34,6 +35,50 @@
                 android:text="Real-time capture rate and UDP network telemetry history"
                 android:textColor="@color/text_secondary"
                 android:textSize="12sp" />
+
+            <!-- Widevine DRM Notice Card (conditionally visible during DRM blackout) -->
+            <LinearLayout
+                android:id="@+id/cardDrmNotice"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:background="@drawable/bg_card"
+                android:backgroundTint="#26D97706"
+                android:orientation="horizontal"
+                android:padding="12dp"
+                android:visibility="gone">
+
+                <ImageView
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:layout_gravity="center_vertical"
+                    android:src="@android:drawable/ic_dialog_alert"
+                    app:tint="#F59E0B" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="10dp"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Widevine L1 DRM Active"
+                        android:textColor="#F59E0B"
+                        android:textSize="12sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="Protected streaming apps (Netflix, Disney+, Prime Video) enforce hardware DRM blackout while audio continues playing. YouTube, Plex, Jellyfin, and SmartTube are unaffected."
+                        android:textColor="@color/text_secondary"
+                        android:textSize="11sp" />
+                </LinearLayout>
+            </LinearLayout>
 
             <!-- Two-column Summary Tiles -->
             <LinearLayout

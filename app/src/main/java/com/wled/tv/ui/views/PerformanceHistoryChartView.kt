@@ -12,6 +12,7 @@ import android.graphics.Shader
 import android.util.AttributeSet
 import android.view.View
 import com.wled.tv.model.ThroughputHistoryPoint
+import java.util.Locale
 import kotlin.math.max
 
 data class HistorySummaryStats(
@@ -104,6 +105,12 @@ class PerformanceHistoryChartView @JvmOverloads constructor(
     private val ppsLinePath = Path()
     private val ppsFillPath = Path()
 
+    private var lastShaderTop = -1f
+    private var lastShaderBottom = -1f
+
+    private var cachedTimeStartStr: String = "-5m"
+    private var cachedTimeMidStr: String = "-2.5m"
+
     fun setData(
         historyPoints: List<ThroughputHistoryPoint>,
         windowSec: Int,
@@ -114,6 +121,8 @@ class PerformanceHistoryChartView @JvmOverloads constructor(
         windowSeconds = windowSec.coerceAtLeast(30)
         targetFps = targetFrameRate.coerceAtLeast(15)
         numDevices = deviceCount.coerceAtLeast(1)
+        cachedTimeStartStr = formatTimeOffset(windowSeconds)
+        cachedTimeMidStr = formatTimeOffset(windowSeconds / 2)
         invalidate()
     }
 
@@ -192,15 +201,12 @@ class PerformanceHistoryChartView @JvmOverloads constructor(
 
         // Draw time labels at bottom
         val timeNowStr = "Now"
-        val timeStartStr = formatTimeOffset(windowSeconds)
-        val timeMidStr = formatTimeOffset(windowSeconds / 2)
-
         val labelY = h - dp(6f)
         timeLabelPaint.textAlign = Paint.Align.LEFT
-        canvas.drawText(timeStartStr, chartLeft, labelY, timeLabelPaint)
+        canvas.drawText(cachedTimeStartStr, chartLeft, labelY, timeLabelPaint)
 
         timeLabelPaint.textAlign = Paint.Align.CENTER
-        canvas.drawText(timeMidStr, chartLeft + chartWidth / 2f, labelY, timeLabelPaint)
+        canvas.drawText(cachedTimeMidStr, chartLeft + chartWidth / 2f, labelY, timeLabelPaint)
 
         timeLabelPaint.textAlign = Paint.Align.RIGHT
         canvas.drawText(timeNowStr, chartRight, labelY, timeLabelPaint)
@@ -262,17 +268,21 @@ class PerformanceHistoryChartView @JvmOverloads constructor(
             ppsFillPath.lineTo(firstX, chartBottom)
             ppsFillPath.close()
 
-            // Setup shaders
-            fpsFillPaint.shader = LinearGradient(
-                0f, chartTop, 0f, chartBottom,
-                Color.parseColor("#1C00E5FF"), Color.parseColor("#0000E5FF"),
-                Shader.TileMode.CLAMP
-            )
-            ppsFillPaint.shader = LinearGradient(
-                0f, chartTop, 0f, chartBottom,
-                Color.parseColor("#18F59E0B"), Color.parseColor("#00F59E0B"),
-                Shader.TileMode.CLAMP
-            )
+            // Setup shaders only when geometry changes
+            if (lastShaderTop != chartTop || lastShaderBottom != chartBottom) {
+                lastShaderTop = chartTop
+                lastShaderBottom = chartBottom
+                fpsFillPaint.shader = LinearGradient(
+                    0f, chartTop, 0f, chartBottom,
+                    Color.parseColor("#1C00E5FF"), Color.parseColor("#0000E5FF"),
+                    Shader.TileMode.CLAMP
+                )
+                ppsFillPaint.shader = LinearGradient(
+                    0f, chartTop, 0f, chartBottom,
+                    Color.parseColor("#18F59E0B"), Color.parseColor("#00F59E0B"),
+                    Shader.TileMode.CLAMP
+                )
+            }
 
             // Draw fills and lines (PPS underneath, FPS on top)
             canvas.drawPath(ppsFillPath, ppsFillPaint)
@@ -288,11 +298,11 @@ class PerformanceHistoryChartView @JvmOverloads constructor(
         return when {
             sec >= 3600 -> {
                 val hours = sec / 3600f
-                if (sec % 3600 == 0) "-${sec / 3600}h" else "-%.1fh".format(hours)
+                if (sec % 3600 == 0) "-${sec / 3600}h" else String.format(Locale.US, "-%.1fh", hours)
             }
             sec >= 60 -> {
                 val mins = sec / 60f
-                if (sec % 60 == 0) "-${sec / 60}m" else "-%.1fm".format(mins)
+                if (sec % 60 == 0) "-${sec / 60}m" else String.format(Locale.US, "-%.1fm", mins)
             }
             else -> "-${sec}s"
         }

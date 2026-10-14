@@ -17,7 +17,8 @@ data class WledDevice(
     val id: String = UUID.randomUUID().toString(),
     val name: String = "TV Backlight",
     val ip: String = "192.168.1.66",
-    val port: Int = 21324,
+    val port: Int = 4048,
+    val protocol: StreamingProtocol = StreamingProtocol.DDP,
     val enabled: Boolean = true,
     val type: DeviceType = DeviceType.PERIMETER,
     val ledCount: Int = 1,                              // For spot lights / ambient fixtures

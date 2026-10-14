@@ -5,12 +5,14 @@
     <!-- Permissions -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <!-- Android TV / Leanback requirements -->
     <uses-feature
@@ -51,6 +53,12 @@
         <!-- TV Strip Geometry & Layout Setup -->
         <activity
             android:name=".ui.SettingsActivity"
+            android:exported="false"
+            android:screenOrientation="landscape" />
+
+        <!-- Interactive Physical Corner Alignment Wizard -->
+        <activity
+            android:name=".ui.CornerFinderActivity"
             android:exported="false"
             android:screenOrientation="landscape" />
 
@@ -100,6 +108,18 @@
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Overlay Control Receiver for Remote Bind & External Automation -->
+        <receiver
+            android:name=".service.OverlayControlReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.wled.tv.ACTION_TOGGLE_OVERLAY" />
+                <action android:name="com.wled.tv.ACTION_SHOW_OVERLAY" />
+                <action android:name="com.wled.tv.ACTION_HIDE_OVERLAY" />
             </intent-filter>
         </receiver>
 

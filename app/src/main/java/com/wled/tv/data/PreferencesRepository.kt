@@ -8,6 +8,7 @@ import com.wled.tv.model.Corner
 import com.wled.tv.model.DeviceType
 import com.wled.tv.model.Direction
 import com.wled.tv.model.PerimeterConfig
+import com.wled.tv.model.StreamingProtocol
 import com.wled.tv.model.WledConfig
 import com.wled.tv.model.WledDevice
 import org.json.JSONArray
@@ -34,6 +35,8 @@ class PreferencesRepository(context: Context) {
             gammaG = prefs.getFloat(KEY_GAMMA_G, 1.0f),
             gammaB = prefs.getFloat(KEY_GAMMA_B, 1.0f),
             colorOrder = prefs.getString(KEY_COLOR_ORDER, "RGB") ?: "RGB",
+            isRgbw = prefs.getBoolean(KEY_RGBW, false),
+            rgbwMode = prefs.getString(KEY_RGBW_MODE, "AUTO_SUBTRACT") ?: "AUTO_SUBTRACT",
             smoothingFactor = prefs.getFloat(KEY_SMOOTHING, 0.40f),
             fps = prefs.getInt(KEY_FPS, 60),
             captureWidth = prefs.getInt(KEY_CAPTURE_WIDTH, 320),
@@ -58,6 +61,12 @@ class PreferencesRepository(context: Context) {
     private fun loadLegacyPrimaryDevice(globalCalibration: ColorCalibration): WledDevice {
         val ip = prefs.getString(KEY_IP, "192.168.1.66") ?: "192.168.1.66"
         val port = prefs.getInt(KEY_PORT, 21324)
+        val protocolStr = prefs.getString(KEY_PROTOCOL, if (port == 4048) StreamingProtocol.DDP.name else StreamingProtocol.DRGB.name)
+        val protocol = try {
+            StreamingProtocol.valueOf(protocolStr ?: StreamingProtocol.DRGB.name)
+        } catch (_: Exception) {
+            if (port == 4048) StreamingProtocol.DDP else StreamingProtocol.DRGB
+        }
 
         val perimeter = PerimeterConfig(
             topLeds = prefs.getInt(KEY_TOP_LEDS, 54),
@@ -83,6 +92,7 @@ class PreferencesRepository(context: Context) {
             name = "TV Backlight",
             ip = ip,
             port = port,
+            protocol = protocol,
             enabled = true,
             type = DeviceType.PERIMETER,
             ledCount = perimeter.totalLeds,
@@ -101,6 +111,12 @@ class PreferencesRepository(context: Context) {
                 val name = obj.optString("name", "Light $i")
                 val ip = obj.optString("ip", "192.168.1.66")
                 val port = obj.optInt("port", 21324)
+                val protocolStr = obj.optString("protocol", if (port == 4048) StreamingProtocol.DDP.name else StreamingProtocol.DRGB.name)
+                val protocol = try {
+                    StreamingProtocol.valueOf(protocolStr)
+                } catch (_: Exception) {
+                    if (port == 4048) StreamingProtocol.DDP else StreamingProtocol.DRGB
+                }
                 val enabled = obj.optBoolean("enabled", true)
                 val typeStr = obj.optString("type", DeviceType.PERIMETER.name)
                 val type = try { DeviceType.valueOf(typeStr) } catch (_: Exception) { DeviceType.PERIMETER }
@@ -143,13 +159,19 @@ class PreferencesRepository(context: Context) {
                         gammaG = obj.optDouble("cal_gamg", fallbackCalibration.gammaG.toDouble()).toFloat(),
                         gammaB = obj.optDouble("cal_gamb", fallbackCalibration.gammaB.toDouble()).toFloat(),
                         colorOrder = colorOrder,
+                        isRgbw = obj.optBoolean("cal_rgbw", fallbackCalibration.isRgbw),
+                        rgbwMode = obj.optString("cal_rgbwm", fallbackCalibration.rgbwMode),
                         smoothingFactor = obj.optDouble("cal_sm", fallbackCalibration.smoothingFactor.toDouble()).toFloat(),
                         fps = fallbackCalibration.fps,
                         captureWidth = fallbackCalibration.captureWidth,
                         captureHeight = fallbackCalibration.captureHeight
                     )
                 } else {
-                    fallbackCalibration.copy(colorOrder = colorOrder)
+                    fallbackCalibration.copy(
+                        colorOrder = colorOrder,
+                        isRgbw = obj.optBoolean("cal_rgbw", fallbackCalibration.isRgbw),
+                        rgbwMode = obj.optString("cal_rgbwm", fallbackCalibration.rgbwMode)
+                    )
                 }
 
                 list.add(
@@ -158,6 +180,7 @@ class PreferencesRepository(context: Context) {
                         name = name,
                         ip = ip,
                         port = port,
+                        protocol = protocol,
                         enabled = enabled,
                         type = type,
                         ledCount = ledCount,
@@ -183,6 +206,7 @@ class PreferencesRepository(context: Context) {
                 put("name", dev.name)
                 put("ip", dev.ip)
                 put("port", dev.port)
+                put("protocol", dev.protocol.name)
                 put("enabled", dev.enabled)
                 put("type", dev.type.name)
                 put("colorOrder", dev.colorOrder)
@@ -217,6 +241,8 @@ class PreferencesRepository(context: Context) {
                 put("cal_gamr", dev.calibration.gammaR)
                 put("cal_gamg", dev.calibration.gammaG)
                 put("cal_gamb", dev.calibration.gammaB)
+                put("cal_rgbw", dev.calibration.isRgbw)
+                put("cal_rgbwm", dev.calibration.rgbwMode)
                 put("cal_sm", dev.calibration.smoothingFactor)
             }
             array.put(obj)
@@ -228,6 +254,7 @@ class PreferencesRepository(context: Context) {
             // Maintain legacy keys for primary device
             putString(KEY_IP, primary.ip)
             putInt(KEY_PORT, primary.port)
+            putString(KEY_PROTOCOL, primary.protocol.name)
             putBoolean(KEY_AUTO_START, config.autoStartOnBoot)
 
             putInt(KEY_TOP_LEDS, primary.perimeter.topLeds)
@@ -254,6 +281,8 @@ class PreferencesRepository(context: Context) {
             putFloat(KEY_GAMMA_G, primary.calibration.gammaG)
             putFloat(KEY_GAMMA_B, primary.calibration.gammaB)
             putString(KEY_COLOR_ORDER, primary.calibration.colorOrder)
+            putBoolean(KEY_RGBW, primary.calibration.isRgbw)
+            putString(KEY_RGBW_MODE, primary.calibration.rgbwMode)
             putFloat(KEY_SMOOTHING, primary.calibration.smoothingFactor)
             putInt(KEY_FPS, config.calibration.fps)
             putInt(KEY_CAPTURE_WIDTH, config.calibration.captureWidth)
@@ -267,6 +296,7 @@ class PreferencesRepository(context: Context) {
 
         private const val KEY_IP = "wled_ip"
         private const val KEY_PORT = "wled_port"
+        private const val KEY_PROTOCOL = "wled_protocol"
         private const val KEY_AUTO_START = "auto_start"
 
         private const val KEY_TOP_LEDS = "top_leds"
@@ -293,6 +323,8 @@ class PreferencesRepository(context: Context) {
         private const val KEY_GAMMA_G = "gamma_g"
         private const val KEY_GAMMA_B = "gamma_b"
         private const val KEY_COLOR_ORDER = "color_order"
+        private const val KEY_RGBW = "rgbw_enabled"
+        private const val KEY_RGBW_MODE = "rgbw_mode"
         private const val KEY_SMOOTHING = "smoothing"
         private const val KEY_FPS = "capture_fps"
         private const val KEY_CAPTURE_WIDTH = "capture_width"

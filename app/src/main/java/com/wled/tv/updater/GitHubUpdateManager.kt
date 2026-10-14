@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.util.Log
+import android.provider.Settings
 import androidx.core.content.FileProvider
 import com.wled.tv.BuildConfig
 import kotlinx.coroutines.Dispatchers
@@ -150,6 +151,40 @@ class GitHubUpdateManager {
 
     private fun installApk(context: Context, apkFile: File) {
         try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                if (!context.packageManager.canRequestPackageInstalls()) {
+                    try {
+                        // 1. Standard Android deep-link directly to app's toggle
+                        val manageIntent = Intent(
+                            Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                            Uri.parse("package:${context.packageName}")
+                        ).apply {
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                        }
+                        context.startActivity(manageIntent)
+                    } catch (_: Exception) {
+                        try {
+                            // 2. Fallback for Android TV (Leanback / Fire TV) without package URI filter
+                            val genericIntent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                            }
+                            context.startActivity(genericIntent)
+                        } catch (_: Exception) {
+                            try {
+                                // 3. Fallback to general Security Settings
+                                val securityIntent = Intent(Settings.ACTION_SECURITY_SETTINGS).apply {
+                                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                }
+                                context.startActivity(securityIntent)
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Cannot launch unknown app sources settings screen", e)
+                            }
+                        }
+                    }
+                    return
+                }
+            }
+
             val apkUri: Uri = FileProvider.getUriForFile(
                 context,
                 "${context.packageName}.fileprovider",
