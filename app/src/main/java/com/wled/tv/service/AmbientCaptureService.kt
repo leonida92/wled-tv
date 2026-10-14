@@ -423,16 +423,24 @@ class AmbientCaptureService : Service() {
     }
 
     fun reloadConfig() {
-        val oldWidth = captureWidth
-        val oldHeight = captureHeight
-        config = prefsRepo.loadConfig()
-        colorProcessor.reset()
-        rawTargetBuffers.clear()
-        ensureWledAwake()
-        if (isCapturing.get() && (config.calibration.captureWidth != oldWidth || config.calibration.captureHeight != oldHeight)) {
-            reinitCaptureResolution(config.calibration.captureWidth, config.calibration.captureHeight)
+        val runnable = Runnable {
+            val oldWidth = captureWidth
+            val oldHeight = captureHeight
+            config = prefsRepo.loadConfig()
+            colorProcessor.reset()
+            rawTargetBuffers.clear()
+            ensureWledAwake()
+            if (isCapturing.get() && (config.calibration.captureWidth != oldWidth || config.calibration.captureHeight != oldHeight)) {
+                reinitCaptureResolution(config.calibration.captureWidth, config.calibration.captureHeight)
+            }
+            Log.i(TAG, "Config reloaded: ${config.enabledDevices.size} enabled devices, Saturation=${config.calibration.saturation}, Resolution=${config.calibration.captureWidth}x${config.calibration.captureHeight}")
         }
-        Log.i(TAG, "Config reloaded: ${config.enabledDevices.size} enabled devices, Saturation=${config.calibration.saturation}, Resolution=${config.calibration.captureWidth}x${config.calibration.captureHeight}")
+        val handler = backgroundHandler
+        if (handler != null && handler.looper.thread.isAlive) {
+            handler.post(runnable)
+        } else {
+            runnable.run()
+        }
     }
 
     private fun startCapture(resultCode: Int, resultData: Intent) {
@@ -601,6 +609,7 @@ class AmbientCaptureService : Service() {
                     if (isDrmActive) isDrmActive = false
                 }
 
+                colorProcessor.isOverlayActive = isOverlayVisible
                 val anyAutoLetterbox = config.enabledDevices.any { it.perimeter.autoLetterbox }
                 if (anyAutoLetterbox) {
                     colorProcessor.scanLetterbox(buffer, width, height, rowStride, pixelStride)
@@ -787,8 +796,11 @@ class AmbientCaptureService : Service() {
                 wm.addView(view, params)
                 overlayView = view
                 isOverlayVisible = true
+                colorProcessor.isOverlayActive = true
                 Log.i(TAG, "Sampling overlay attached to WindowManager")
-                updateOverlayData()
+                backgroundHandler?.post {
+                    updateOverlayData()
+                } ?: updateOverlayData()
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to add overlay view to WindowManager", e)
             }
@@ -807,6 +819,7 @@ class AmbientCaptureService : Service() {
             } finally {
                 overlayView = null
                 isOverlayVisible = false
+                colorProcessor.isOverlayActive = false
             }
         }
     }
@@ -864,6 +877,7 @@ class AmbientCaptureService : Service() {
         hideSamplingOverlay()
         isRunning = false
         isDrmActive = false
+        colorProcessor.isOverlayActive = false
         blackWithAudioStartTime = 0L
         lastAudioCheckTime = 0L
         cachedIsAudioPlaying = false

@@ -239,8 +239,12 @@ class ScreenColorProcessorTest {
 
         val zones = processor.getActiveZones(perimeterDev)
         assertEquals(30, zones.size)
+        // Verify perimeter left edge shifted inward to pillarbox crop boundary (~0.125f)
+        assertTrue("Expected zones.first().left >= 0.12f but was ${zones.first().left}", zones.first().left >= 0.12f)
+        val rightEdgeZone = zones.find { it.right > 0.80f }
+        assertTrue(rightEdgeZone != null && rightEdgeZone.right <= 0.88f)
 
-        // Left Ambient device should generate 1 active zone
+        // Left Ambient device should generate 1 active zone shifted inward
         val leftAmbientDev = com.wled.tv.model.WledDevice(
             id = "left_lamp",
             type = com.wled.tv.model.DeviceType.LEFT_AMBIENT,
@@ -249,6 +253,58 @@ class ScreenColorProcessorTest {
         )
         val ambientZones = processor.getActiveZones(leftAmbientDev)
         assertEquals(1, ambientZones.size)
+        assertTrue(ambientZones.first().left >= 0.12f)
+    }
+
+    @Test
+    fun overlayRejection_disabledWhenOverlayNotVisible_preservesTealAndBlueScenes() {
+        val processor = ScreenColorProcessor()
+        processor.isOverlayActive = false
+
+        val width = 320
+        val height = 180
+        val rowStride = width * 4
+        val pixelStride = 4
+        val buffer = java.nio.ByteBuffer.allocateDirect(rowStride * height)
+
+        // Fill with deep ocean teal/blue: RGB(10, 80, 160)
+        // (r < 18 && g > 25 && b > 25)
+        for (y in 0 until height) {
+            for (x in 0 until width) {
+                val offset = y * rowStride + x * pixelStride
+                buffer.put(offset, 10.toByte())
+                buffer.put(offset + 1, 80.toByte())
+                buffer.put(offset + 2, 160.toByte())
+                buffer.put(offset + 3, 255.toByte())
+            }
+        }
+
+        // scanLetterbox should NOT consider this dark teal/blue frame as black letterbox
+        processor.scanLetterbox(buffer, width, height, rowStride, pixelStride)
+        assertEquals(0.0f, processor.currentTopCrop, 0.001f)
+        assertEquals(0.0f, processor.currentLeftCrop, 0.001f)
+
+        // Extracting raw colors should NOT reject the teal pixels when isOverlayActive is false
+        val device = com.wled.tv.model.WledDevice(
+            id = "top_strip",
+            type = com.wled.tv.model.DeviceType.PERIMETER,
+            perimeter = com.wled.tv.model.PerimeterConfig(topLeds = 4, rightLeds = 0, bottomLeds = 0, leftLeds = 0)
+        )
+        val output = ByteArray(4 * 3)
+        processor.extractRawColors(
+            buffer = buffer,
+            width = width,
+            height = height,
+            rowStride = rowStride,
+            pixelStride = pixelStride,
+            device = device,
+            calibration = com.wled.tv.model.ColorCalibration(),
+            outputRawRgb = output
+        )
+
+        // Blue channel (index 2) must remain vibrant (~160), not darkened toward 0
+        val sampledBlue = output[2].toInt() and 0xFF
+        assertTrue("Sampled blue should be vibrant (> 100) but was $sampledBlue", sampledBlue > 100)
     }
 
     @Test

@@ -36,6 +36,9 @@ class ScreenColorProcessor {
     val currentLeftCrop: Float get() = detectedLeftCrop
     val currentRightCrop: Float get() = detectedRightCrop
 
+    @Volatile
+    var isOverlayActive: Boolean = false
+
     // Zero-allocation caches
     private val cachedPerimeterZones = HashMap<String, Pair<PerimeterConfig, List<RectF>>>()
     private val cachedAmbientSubZones = HashMap<String, Pair<RectF, List<RectF>>>()
@@ -68,6 +71,7 @@ class ScreenColorProcessor {
         cachedOuterIndices = IntArray(0)
         cachedProbeHeight = -1
         cachedProbeY = IntArray(0)
+        isOverlayActive = false
     }
 
     /**
@@ -182,12 +186,12 @@ class ScreenColorProcessor {
             val activeWidth = (activeRight - activeLeft).coerceAtLeast(0.1f)
 
             val region = when (device.type) {
-                DeviceType.PERIMETER -> RectF(activeLeft, activeTop, activeRight, activeBottom)
-                DeviceType.LEFT_AMBIENT -> RectF(activeLeft, activeTop, activeLeft + 0.25f * activeWidth, activeBottom)
-                DeviceType.RIGHT_AMBIENT -> RectF(activeRight - 0.25f * activeWidth, activeTop, activeRight, activeBottom)
-                DeviceType.TOP_AMBIENT -> RectF(activeLeft, activeTop, activeRight, activeTop + 0.25f * activeHeight)
-                DeviceType.BOTTOM_AMBIENT -> RectF(activeLeft, activeBottom - 0.25f * activeHeight, activeRight, activeBottom)
-                DeviceType.FULL_SCREEN -> RectF(activeLeft, activeTop, activeRight, activeBottom)
+                DeviceType.PERIMETER -> rect(activeLeft, activeTop, activeRight, activeBottom)
+                DeviceType.LEFT_AMBIENT -> rect(activeLeft, activeTop, activeLeft + 0.25f * activeWidth, activeBottom)
+                DeviceType.RIGHT_AMBIENT -> rect(activeRight - 0.25f * activeWidth, activeTop, activeRight, activeBottom)
+                DeviceType.TOP_AMBIENT -> rect(activeLeft, activeTop, activeRight, activeTop + 0.25f * activeHeight)
+                DeviceType.BOTTOM_AMBIENT -> rect(activeLeft, activeBottom - 0.25f * activeHeight, activeRight, activeBottom)
+                DeviceType.FULL_SCREEN -> rect(activeLeft, activeTop, activeRight, activeBottom)
                 DeviceType.CUSTOM_BOX -> device.customRect
             }
 
@@ -257,6 +261,13 @@ class ScreenColorProcessor {
         filter.apply(rawRgb, ledCount, smoothingFactor, outputRgb)
     }
 
+    private fun rect(l: Float, t: Float, r: Float, b: Float): RectF = RectF(l, t, r, b).apply {
+        left = l
+        top = t
+        right = r
+        bottom = b
+    }
+
     private fun computeAmbientSubZones(type: DeviceType, region: RectF, ledCount: Int): List<RectF> {
         val list = ArrayList<RectF>(ledCount)
         for (i in 0 until ledCount) {
@@ -265,31 +276,31 @@ class ScreenColorProcessor {
                     val step = (region.bottom - region.top) / ledCount
                     val b = region.bottom - (i * step)
                     val t = b - step
-                    RectF(region.left, t.coerceAtLeast(region.top), region.right, b.coerceAtMost(region.bottom))
+                    rect(region.left, t.coerceAtLeast(region.top), region.right, b.coerceAtMost(region.bottom))
                 }
                 DeviceType.RIGHT_AMBIENT -> {
                     val step = (region.bottom - region.top) / ledCount
                     val b = region.bottom - (i * step)
                     val t = b - step
-                    RectF(region.left, t.coerceAtLeast(region.top), region.right, b.coerceAtMost(region.bottom))
+                    rect(region.left, t.coerceAtLeast(region.top), region.right, b.coerceAtMost(region.bottom))
                 }
                 DeviceType.TOP_AMBIENT -> {
                     val step = (region.right - region.left) / ledCount
                     val l = region.left + (i * step)
                     val r = l + step
-                    RectF(l.coerceAtLeast(region.left), region.top, r.coerceAtMost(region.right), region.bottom)
+                    rect(l.coerceAtLeast(region.left), region.top, r.coerceAtMost(region.right), region.bottom)
                 }
                 DeviceType.BOTTOM_AMBIENT -> {
                     val step = (region.right - region.left) / ledCount
                     val l = region.left + (i * step)
                     val r = l + step
-                    RectF(l.coerceAtLeast(region.left), region.top, r.coerceAtMost(region.right), region.bottom)
+                    rect(l.coerceAtLeast(region.left), region.top, r.coerceAtMost(region.right), region.bottom)
                 }
                 else -> {
                     val step = (region.right - region.left) / ledCount
                     val l = region.left + (i * step)
                     val r = l + step
-                    RectF(l.coerceAtLeast(region.left), region.top, r.coerceAtMost(region.right), region.bottom)
+                    rect(l.coerceAtLeast(region.left), region.top, r.coerceAtMost(region.right), region.bottom)
                 }
             }
             list.add(subZone)
@@ -356,8 +367,10 @@ class ScreenColorProcessor {
                 val g = buffer.get(pixelOffset + 1).toInt() and 0xFF
                 val b = buffer.get(pixelOffset + 2).toInt() and 0xFF
 
-                // Overlay rejection: ignore synthetic cyan wireframe lines (#00E5FF)
-                if (r < 18 && g > 25 && b > 25) {
+                // Overlay rejection: only active when sampling overlay HUD is visible,
+                // and tightly matched to the synthetic cyan wireframe (#00E5FF) to prevent rejecting
+                // real ocean/teal/blue movie content.
+                if (isOverlayActive && r < 18 && g > 25 && b > 25 && kotlin.math.abs(g - b) <= 40) {
                     weightSum += 0.35
                     continue
                 }
@@ -753,8 +766,8 @@ class ScreenColorProcessor {
         val g = buffer.get(offset + 1).toInt() and 0xFF
         val b = buffer.get(offset + 2).toInt() and 0xFF
 
-        // Overlay rejection: ignore synthetic cyan wireframe lines (#00E5FF)
-        if (r < 18 && g > 25 && b > 25) {
+        // Overlay rejection: only active when sampling overlay HUD is visible
+        if (isOverlayActive && r < 18 && g > 25 && b > 25 && kotlin.math.abs(g - b) <= 40) {
             return false
         }
 

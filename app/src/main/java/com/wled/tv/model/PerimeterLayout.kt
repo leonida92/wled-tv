@@ -83,12 +83,19 @@ data class PerimeterConfig(
         val depthX = (depthY * (9.0f / 16.0f)).coerceIn(0.02f, activeW * 0.40f)
 
         // 1. Compute physical edge arrays (each ordered clockwise)
+        fun rect(l: Float, t: Float, r: Float, b: Float): RectF = RectF(l, t, r, b).apply {
+            left = l
+            top = t
+            right = r
+            bottom = b
+        }
+
         val topZones = ArrayList<RectF>(topLeds)
         if (topLeds > 0) {
             val step = activeW / topLeds
             for (i in 0 until topLeds) {
                 val left = xLeft + (i * step)
-                topZones.add(RectF(left, yTop, left + step, yTop + depthY))
+                topZones.add(rect(left, yTop, left + step, yTop + depthY))
             }
         }
 
@@ -97,7 +104,7 @@ data class PerimeterConfig(
             val step = activeH / rightLeds
             for (i in 0 until rightLeds) {
                 val top = yTop + (i * step)
-                rightZones.add(RectF(xRight - depthX, top, xRight, top + step))
+                rightZones.add(rect(xRight - depthX, top, xRight, top + step))
             }
         }
 
@@ -106,7 +113,7 @@ data class PerimeterConfig(
             val step = activeW / bottomLeds
             for (i in 0 until bottomLeds) {
                 val right = xRight - (i * step)
-                bottomZones.add(RectF(right - step, yBottom - depthY, right, yBottom))
+                bottomZones.add(rect(right - step, yBottom - depthY, right, yBottom))
             }
         }
 
@@ -115,7 +122,7 @@ data class PerimeterConfig(
             val step = activeH / leftLeds
             for (i in 0 until leftLeds) {
                 val bottom = yBottom - (i * step)
-                leftZones.add(RectF(xLeft, bottom - step, xLeft + depthX, bottom))
+                leftZones.add(rect(xLeft, bottom - step, xLeft + depthX, bottom))
             }
         }
 
