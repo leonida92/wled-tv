@@ -2,12 +2,12 @@
 
 [![License: CC BY-NC 4.0](https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-nc/4.0/)
 [![Platform](https://img.shields.io/badge/Platform-Android%20TV%20%7C%20Google%20TV-blue.svg)](https://android.com/tv/)
-[![WLED Compatible](https://img.shields.io/badge/WLED-UDP%20DRGB%20Realtime-success.svg)](https://kno.wled.ge/)
+[![WLED Compatible](https://img.shields.io/badge/WLED-DDP%20%7C%20DRGB%20%7C%20WARLS-success.svg)](https://kno.wled.ge/)
 [![Kotlin](https://img.shields.io/badge/Language-Kotlin-purple.svg)](https://kotlinlang.org/)
 
 **WLED TV** is a native, ultra-low-latency ambient bias lighting application designed specifically for **Google TV Streamer**, **Chromecast with Google TV**, and **Android TV** devices.
 
-It captures on-screen video in real time, extracts rich chroma-weighted edge and ambient colors, and streams them concurrently over your local Wi-Fi/Ethernet network to multiple [WLED](https://kno.wled.ge/) addressable LED strips and fixtures using low-overhead **UDP DRGB** packets (no Raspberry Pi, capture card, or Hyperion server required).
+It captures on-screen video in real time, extracts rich chroma-weighted edge and ambient colors, and streams them concurrently over your local Wi-Fi/Ethernet network to multiple [WLED](https://kno.wled.ge/) addressable LED strips and fixtures using high-performance **DDP (Distributed Display Protocol), DRGB, and WARLS UDP** streaming packets (no Raspberry Pi, capture card, or Hyperion server required).
 
 ---
 
@@ -55,9 +55,20 @@ It captures on-screen video in real time, extracts rich chroma-weighted edge and
   - **Black Level Cutoff Threshold (0 - 50)**: Turn LEDs completely OFF (R=0, G=0, B=0) in dark scenes instead of emitting faint gray glow.
 - **16:9 Live LED Dashboard Simulation**:
   - Live 16:9 TV chassis simulation rendering individual LED color dots in real-time.
-- **Ultra-Low Latency and High Performance**:
-  - Downsampled GPU capture buffer (320 x 180) enables sub-millisecond edge processing.
-  - Direct UDP DRGB packets on port 21324 with zero intermediate proxies.
+- **Multi-Protocol Streaming (DDP, DRGB, WARLS)**:
+  - **DDP (Distributed Display Protocol, port 4048)** with atomic multi-packet frame synchronization to eliminate visual tearing on long strips (>480 LEDs).
+  - Native 4-channel **RGBW (SK6812)** white channel gamut extraction (Auto Subtract and Add modes).
+  - Realtime **DRGB** and indexed **WARLS** fallback on port 21324.
+- **Floating Diagnostic HUD & Sampling Zone Visualizer**:
+  - Optional real-time on-screen wireframe overlay displaying active LED sampling boxes, live color dots, letterbox crop percentages, and stream FPS/PPS.
+  - One-click toggle directly from notification action drawer or broadcast intent.
+- **Physical Corner Finder Mapping Tool**:
+  - Interactive on-screen visualizer to map physical strip corners (Top-Left, Top-Right, Bottom-Right, Bottom-Left) and automatically calculate segment counts, starting corner, and clockwise/counter-clockwise wiring.
+- **Widevine L1 DRM Blackout Protection**:
+  - Automatically detects protected hardware video surfaces (100% black frame with active audio) and safely pauses unnecessary network transmissions.
+- **Ultra-Low Latency and Zero-Allocation Hot Path**:
+  - Precomputed Gamma 256-entry Look-Up Table (LUT) and cached probe arrays.
+  - Zero object/array allocations inside the 60 FPS capture loop.
   - Uses less than 2% CPU on modern TV streaming devices.
 - **HDMI CEC Standby and Instant Wake**:
   - Automatically blacks out all LED fixtures when the TV is put into standby via the remote.
