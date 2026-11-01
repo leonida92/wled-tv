@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -11,8 +13,8 @@ android {
         applicationId = "com.wled.tv"
         minSdk = 26
         targetSdk = 34
-        versionCode = 32
-        versionName = "1.3.0"
+        versionCode = 33
+        versionName = "1.3.1"
 
         vectorDrawables {
             useSupportLibrary = true
@@ -27,10 +29,22 @@ android {
         create("release") {
             val keystoreFile = rootProject.file("wled-tv-release.keystore")
             if (keystoreFile.exists()) {
+                val localProps = Properties().apply {
+                    val localPropsFile = rootProject.file("local.properties")
+                    if (localPropsFile.exists()) {
+                        localPropsFile.inputStream().use { load(it) }
+                    }
+                }
                 storeFile = keystoreFile
-                storePassword = "wledtv2026"
-                keyAlias = "wledtv"
-                keyPassword = "wledtv2026"
+                storePassword = System.getenv("RELEASE_STORE_PASSWORD")
+                    ?: localProps.getProperty("release.store.password")
+                    ?: "wledtv2026"
+                keyAlias = System.getenv("RELEASE_KEY_ALIAS")
+                    ?: localProps.getProperty("release.key.alias")
+                    ?: "wledtv"
+                keyPassword = System.getenv("RELEASE_KEY_PASSWORD")
+                    ?: localProps.getProperty("release.key.password")
+                    ?: "wledtv2026"
             }
         }
     }
@@ -49,14 +63,18 @@ android {
             isDebuggable = true
         }
     }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
     kotlinOptions {
         jvmTarget = "17"
     }
+
     buildFeatures {
+        viewBinding = true
         buildConfig = true
     }
 
@@ -77,5 +95,8 @@ dependencies {
     implementation(libs.androidx.lifecycle.service)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.okhttp)
+
+    // Unit testing
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.0")
 }

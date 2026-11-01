@@ -349,6 +349,71 @@ class WledUdpSenderTest {
     }
 
     @Test
+    fun sendDrgbFrame_clampedTo490Leds() {
+        val receiver = DatagramSocket(0, InetAddress.getByName("127.0.0.1")).apply {
+            soTimeout = 2000
+        }
+        val port = receiver.localPort
+        val sender = WledUdpSender()
+
+        try {
+            val leds = 500
+            val rgb = ByteArray(leds * 3) { 128.toByte() }
+            val count = sender.sendDrgbFrame(
+                ip = "127.0.0.1",
+                port = port,
+                rgb = rgb,
+                ledCount = leds,
+                colorOrder = "RGB"
+            )
+
+            assertEquals(1, count)
+            val buffer = ByteArray(2048)
+            val packet = DatagramPacket(buffer, buffer.size)
+            receiver.receive(packet)
+
+            // Clamped to 490 LEDs: 2 header bytes + 490 * 3 = 1472 bytes
+            assertEquals(2 + 490 * 3, packet.length)
+            assertEquals(0x02.toByte(), buffer[0])
+        } finally {
+            sender.close()
+            receiver.close()
+        }
+    }
+
+    @Test
+    fun sendDdpFrame_multiPacket_returnsAccuratePacketCount() {
+        val receiver = DatagramSocket(0, InetAddress.getByName("127.0.0.1")).apply {
+            soTimeout = 2000
+        }
+        val port = receiver.localPort
+        val sender = WledUdpSender()
+
+        try {
+            // 500 RGB LEDs = 1500 channels > 1440 max per DDP chunk => 2 packets
+            val leds = 500
+            val rgb = ByteArray(leds * 3)
+            val packetsSent = sender.sendDdpFrame(
+                ip = "127.0.0.1",
+                port = port,
+                rgb = rgb,
+                ledCount = leds
+            )
+
+            assertEquals(2, packetsSent)
+
+            val buffer = ByteArray(2048)
+            val packet1 = DatagramPacket(buffer, buffer.size)
+            receiver.receive(packet1)
+            val packet2 = DatagramPacket(buffer, buffer.size)
+            receiver.receive(packet2)
+        } finally {
+            sender.close()
+            receiver.close()
+        }
+    }
+
+    @Test
     fun close_multipleTimes_isSafe() {
         val sender = WledUdpSender()
         sender.close()

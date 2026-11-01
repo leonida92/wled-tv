@@ -80,9 +80,12 @@ class ZoneCanvasView @JvmOverloads constructor(
         textAlign = Paint.Align.CENTER
     }
 
+    private var cachedZones: List<RectF> = emptyList()
+
     fun setConfig(perimeterConfig: PerimeterConfig, border: ActiveBorder) {
         this.config = perimeterConfig
         this.activeBorder = border
+        this.cachedZones = perimeterConfig.computeLedZones()
         invalidate()
     }
 
@@ -122,9 +125,10 @@ class ZoneCanvasView @JvmOverloads constructor(
             canvas.drawRect(xRight, yTop, w, yBottom, letterboxShadePaint)
         }
 
-        // 4. Draw all LED sampling zones
-        val zones = config.computeLedZones()
-        for (z in zones) {
+        // 4. Draw all LED sampling zones (zero allocation)
+        val zones = if (cachedZones.isNotEmpty()) cachedZones else config.computeLedZones().also { cachedZones = it }
+        for (i in zones.indices) {
+            val z = zones[i]
             val zl = z.left * w
             val zt = z.top * h
             val zr = z.right * w

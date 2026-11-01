@@ -10,12 +10,9 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
-class WledHttpClient {
-
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(2, TimeUnit.SECONDS)
-        .readTimeout(2, TimeUnit.SECONDS)
-        .build()
+class WledHttpClient(
+    private val client: OkHttpClient = sharedClient
+) {
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
@@ -119,6 +116,13 @@ class WledHttpClient {
 
     companion object {
         private const val TAG = "WledHttpClient"
+
+        val sharedClient: OkHttpClient by lazy {
+            OkHttpClient.Builder()
+                .connectTimeout(2, TimeUnit.SECONDS)
+                .readTimeout(2, TimeUnit.SECONDS)
+                .build()
+        }
     }
 }
 
@@ -133,4 +137,3 @@ data class WledDeviceInfo(
 object DeviceReachabilityCache {
     val map = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
 }
-

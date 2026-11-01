@@ -73,9 +73,22 @@ class SamplingOverlayView @JvmOverloads constructor(
         isFakeBoldText = true
     }
 
+    // Secondary System Stats Mini-Pill (CPU, RAM, Disk)
+    private val subBadgeDotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#10B981") // Emerald accent dot
+        style = Paint.Style.FILL
+    }
+
+    private val subBadgeTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#94A3B8") // Muted slate gray
+        textSize = 10f * density
+        isFakeBoldText = true
+    }
+
     // Reusable structures for zero-allocation drawing
     private val tempRect = RectF()
     private val badgeRect = RectF()
+    private val subBadgeRect = RectF()
 
     // Live state
     @Volatile
@@ -108,6 +121,12 @@ class SamplingOverlayView @JvmOverloads constructor(
     @Volatile
     private var cachedTextWidth: Float = 0f
 
+    @Volatile
+    private var cachedSystemStats: String = ""
+
+    @Volatile
+    private var cachedSystemStatsWidth: Float = 0f
+
     init {
         setWillNotDraw(false)
     }
@@ -120,7 +139,8 @@ class SamplingOverlayView @JvmOverloads constructor(
         currentRightCrop: Float = 0.0f,
         fps: Float,
         pps: Int,
-        isDrmActive: Boolean = false
+        isDrmActive: Boolean = false,
+        systemStats: String = ""
     ) {
         this.devicesData = devices
         this.topCrop = currentTopCrop
@@ -146,6 +166,9 @@ class SamplingOverlayView @JvmOverloads constructor(
         val content = "$fpsStr$cropInfo$drmInfo$devInfo • $totalLeds LEDs"
         this.cachedHudContent = content
         this.cachedTextWidth = badgeTextPaint.measureText(content)
+
+        this.cachedSystemStats = systemStats
+        this.cachedSystemStatsWidth = if (systemStats.isNotEmpty()) subBadgeTextPaint.measureText(systemStats) else 0f
 
         postInvalidate()
     }
@@ -240,6 +263,28 @@ class SamplingOverlayView @JvmOverloads constructor(
             // Text
             val textY = pillY + (pillHeight / 2f) + (4f * density)
             canvas.drawText(hudContent, dotCx + (8f * density), textY, badgeTextPaint)
+
+            // 3. Draw Secondary System Stats Mini-Pill (CPU, RAM, Disk) directly beneath the main pill
+            val sysStats = cachedSystemStats
+            if (sysStats.isNotEmpty()) {
+                val subTextWidth = cachedSystemStatsWidth
+                val subPillHeight = 20f * density
+                val subPillWidth = subTextWidth + (28f * density)
+                val subPillX = (w - subPillWidth) / 2f
+                val subPillY = pillY + pillHeight + (6f * density)
+
+                subBadgeRect.set(subPillX, subPillY, subPillX + subPillWidth, subPillY + subPillHeight)
+
+                canvas.drawRoundRect(subBadgeRect, subPillHeight / 2f, subPillHeight / 2f, badgeBgPaint)
+                canvas.drawRoundRect(subBadgeRect, subPillHeight / 2f, subPillHeight / 2f, badgeBorderPaint)
+
+                val subDotCx = subPillX + (10f * density)
+                val subDotCy = subPillY + (subPillHeight / 2f)
+                canvas.drawCircle(subDotCx, subDotCy, 2.5f * density, subBadgeDotPaint)
+
+                val subTextY = subPillY + (subPillHeight / 2f) + (3.5f * density)
+                canvas.drawText(sysStats, subDotCx + (7f * density), subTextY, subBadgeTextPaint)
+            }
         }
     }
 }

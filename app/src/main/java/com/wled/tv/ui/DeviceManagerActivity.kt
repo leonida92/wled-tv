@@ -31,7 +31,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.util.concurrent.ConcurrentHashMap
 
 class DeviceManagerActivity : AppCompatActivity() {
 
@@ -305,7 +304,7 @@ class DeviceManagerActivity : AppCompatActivity() {
 
     private fun discoverWledDevices() {
         Toast.makeText(this, "Scanning local network for WLED devices...", Toast.LENGTH_SHORT).show()
-        val found = mutableListOf<DiscoveredWled>()
+        val found = java.util.concurrent.CopyOnWriteArrayList<DiscoveredWled>()
         val discovery = WledDiscovery(this)
 
         lifecycleScope.launch {

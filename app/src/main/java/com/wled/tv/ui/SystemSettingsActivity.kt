@@ -256,6 +256,7 @@ adb shell appops set com.wled.tv PROJECT_MEDIA default
 
     override fun onResume() {
         super.onResume()
+        config = prefsRepo.loadConfig()
         updateUiValues()
     }
 

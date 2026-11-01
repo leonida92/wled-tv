@@ -21,14 +21,15 @@ class WledUdpSender {
 
     /**
      * Universal frame dispatcher for a configured WledDevice.
+     * Returns the number of UDP datagrams successfully sent (0 on failure).
      */
     fun sendDeviceFrame(
         device: WledDevice,
         rgb: ByteArray,
         ledCount: Int = device.totalLeds,
         timeoutSeconds: Byte = 2
-    ) {
-        sendFrame(
+    ): Int {
+        return sendFrame(
             ip = device.ip,
             port = device.port,
             protocol = device.protocol,
@@ -43,6 +44,7 @@ class WledUdpSender {
 
     /**
      * Universal frame dispatcher by protocol.
+     * Returns the number of UDP datagrams successfully sent (0 on failure).
      */
     fun sendFrame(
         ip: String,
@@ -54,8 +56,8 @@ class WledUdpSender {
         isRgbw: Boolean = false,
         rgbwMode: String = "AUTO_SUBTRACT",
         timeoutSeconds: Byte = 2
-    ) {
-        when (protocol) {
+    ): Int {
+        return when (protocol) {
             StreamingProtocol.DDP -> sendDdpFrame(
                 ip = ip,
                 port = port,
@@ -89,7 +91,8 @@ class WledUdpSender {
      * Features:
      *   - Multi-packet atomic synchronization: Push flag on final packet prevents visual tearing on long strips (>480 LEDs).
      *   - Native 4-channel RGBW support (SK6812 gamut extraction: Auto White Subtract or Add).
-     *   - Zero GC allocations in the 60Hz loop via pre-allocated datagram buffers.
+     *   - Zero GC allocations in the 60Hz loop via pre-allocated datagram buffers and integer color-order decoding.
+     * Returns number of packets transmitted (0 on error).
      */
     fun sendDdpFrame(
         ip: String,
@@ -99,9 +102,9 @@ class WledUdpSender {
         colorOrder: String = "RGB",
         isRgbw: Boolean = false,
         rgbwMode: String = "AUTO_SUBTRACT"
-    ) {
+    ): Int {
         val cleanIp = ip.trim()
-        if (cleanIp.isBlank() || ledCount <= 0 || rgb.size < ledCount * 3) return
+        if (cleanIp.isBlank() || ledCount <= 0 || rgb.size < ledCount * 3) return 0
 
         try {
             val currentSocket = ensureSocket()
@@ -142,6 +145,10 @@ class WledUdpSender {
                 datagramPacket?.port = port
             }
 
+            val order = parseColorOrder(colorOrder)
+            val isOrderRgb = (order == ORDER_RGB)
+            var packetsSent = 0
+
             for (packetIndex in 0 until packetCount) {
                 val isFinalPacket = (packetIndex == packetCount - 1)
                 val chunkChannels = minOf(remainingChannels, DDP_MAX_CHANNELS_PER_PACKET)
@@ -167,7 +174,6 @@ class WledUdpSender {
 
                 // 2. Pixel payload
                 var dst = DDP_HEADER_LEN
-                val isOrderRgb = colorOrder.equals("RGB", ignoreCase = true)
 
                 if (!isRgbw) {
                     // 3-channel RGB
@@ -180,12 +186,12 @@ class WledUdpSender {
                             val r = rgb[src]
                             val g = rgb[src + 1]
                             val b = rgb[src + 2]
-                            when (colorOrder.uppercase()) {
-                                "GRB" -> { packetBuffer[dst++] = g; packetBuffer[dst++] = r; packetBuffer[dst++] = b }
-                                "BGR" -> { packetBuffer[dst++] = b; packetBuffer[dst++] = g; packetBuffer[dst++] = r }
-                                "BRG" -> { packetBuffer[dst++] = b; packetBuffer[dst++] = r; packetBuffer[dst++] = g }
-                                "RBG" -> { packetBuffer[dst++] = r; packetBuffer[dst++] = b; packetBuffer[dst++] = g }
-                                "GBR" -> { packetBuffer[dst++] = g; packetBuffer[dst++] = b; packetBuffer[dst++] = r }
+                            when (order) {
+                                ORDER_GRB -> { packetBuffer[dst++] = g; packetBuffer[dst++] = r; packetBuffer[dst++] = b }
+                                ORDER_BGR -> { packetBuffer[dst++] = b; packetBuffer[dst++] = g; packetBuffer[dst++] = r }
+                                ORDER_BRG -> { packetBuffer[dst++] = b; packetBuffer[dst++] = r; packetBuffer[dst++] = g }
+                                ORDER_RBG -> { packetBuffer[dst++] = r; packetBuffer[dst++] = b; packetBuffer[dst++] = g }
+                                ORDER_GBR -> { packetBuffer[dst++] = g; packetBuffer[dst++] = b; packetBuffer[dst++] = r }
                                 else -> { packetBuffer[dst++] = r; packetBuffer[dst++] = g; packetBuffer[dst++] = b }
                             }
                         }
@@ -214,12 +220,12 @@ class WledUdpSender {
                         val bByte = bOut.toByte()
                         val wByte = wOut.toByte()
 
-                        when (colorOrder.uppercase()) {
-                            "GRB" -> { packetBuffer[dst++] = gByte; packetBuffer[dst++] = rByte; packetBuffer[dst++] = bByte; packetBuffer[dst++] = wByte }
-                            "BGR" -> { packetBuffer[dst++] = bByte; packetBuffer[dst++] = gByte; packetBuffer[dst++] = rByte; packetBuffer[dst++] = wByte }
-                            "BRG" -> { packetBuffer[dst++] = bByte; packetBuffer[dst++] = rByte; packetBuffer[dst++] = gByte; packetBuffer[dst++] = wByte }
-                            "RBG" -> { packetBuffer[dst++] = rByte; packetBuffer[dst++] = bByte; packetBuffer[dst++] = gByte; packetBuffer[dst++] = wByte }
-                            "GBR" -> { packetBuffer[dst++] = gByte; packetBuffer[dst++] = bByte; packetBuffer[dst++] = rByte; packetBuffer[dst++] = wByte }
+                        when (order) {
+                            ORDER_GRB -> { packetBuffer[dst++] = gByte; packetBuffer[dst++] = rByte; packetBuffer[dst++] = bByte; packetBuffer[dst++] = wByte }
+                            ORDER_BGR -> { packetBuffer[dst++] = bByte; packetBuffer[dst++] = gByte; packetBuffer[dst++] = rByte; packetBuffer[dst++] = wByte }
+                            ORDER_BRG -> { packetBuffer[dst++] = bByte; packetBuffer[dst++] = rByte; packetBuffer[dst++] = gByte; packetBuffer[dst++] = wByte }
+                            ORDER_RBG -> { packetBuffer[dst++] = rByte; packetBuffer[dst++] = bByte; packetBuffer[dst++] = gByte; packetBuffer[dst++] = wByte }
+                            ORDER_GBR -> { packetBuffer[dst++] = gByte; packetBuffer[dst++] = bByte; packetBuffer[dst++] = rByte; packetBuffer[dst++] = wByte }
                             else -> { packetBuffer[dst++] = rByte; packetBuffer[dst++] = gByte; packetBuffer[dst++] = bByte; packetBuffer[dst++] = wByte }
                         }
                     }
@@ -230,28 +236,30 @@ class WledUdpSender {
                 datagramPacket?.let {
                     it.length = DDP_HEADER_LEN + chunkChannels
                     currentSocket.send(it)
+                    packetsSent++
                 }
 
                 channelOffset += chunkChannels
                 remainingChannels -= chunkChannels
             }
+            return packetsSent
         } catch (e: SocketException) {
             handleSocketException(e, cleanIp)
+            return 0
         } catch (e: Exception) {
             val now = System.currentTimeMillis()
             if (now - lastErrorTime > 3000L) {
                 Log.w(TAG, "Failed to send DDP UDP frame to $cleanIp: ${e.message}")
                 lastErrorTime = now
             }
+            return 0
         }
     }
 
     /**
      * Sends raw DRGB (0x02) realtime packet directly to WLED.
-     * DRGB format:
-     *   Byte 0: 0x02 (DRGB protocol)
-     *   Byte 1: timeout in seconds (1-255, e.g., 2)
-     *   Byte 2..N: C0_0, C0_1, C0_2, C1_0, C1_1, C1_2, ... based on colorOrder
+     * Clamped to 490 LEDs (1472 bytes) to respect Ethernet MTU without fragmentation.
+     * Returns 1 on success, 0 on failure.
      */
     fun sendDrgbFrame(
         ip: String,
@@ -260,9 +268,10 @@ class WledUdpSender {
         rgb: ByteArray,
         ledCount: Int,
         colorOrder: String = "RGB"
-    ) {
+    ): Int {
         val cleanIp = ip.trim()
-        if (cleanIp.isBlank() || ledCount <= 0 || rgb.size < ledCount * 3) return
+        val count = ledCount.coerceAtMost(MAX_DRGB_LEDS)
+        if (cleanIp.isBlank() || count <= 0 || rgb.size < count * 3) return 0
 
         try {
             val currentSocket = ensureSocket()
@@ -273,7 +282,7 @@ class WledUdpSender {
                 addressMap[cleanIp] = address
             }
 
-            val requiredSize = 2 + ledCount * 3
+            val requiredSize = 2 + count * 3
             val cacheKey = "$cleanIp:$port:drgb"
             var packetBuffer = packetBuffers[cacheKey]
             var datagramPacket = datagramPackets[cacheKey]
@@ -292,10 +301,10 @@ class WledUdpSender {
             packetBuffer[0] = 0x02 // DRGB protocol identifier
             packetBuffer[1] = timeoutSeconds // Timeout in seconds
 
-            // Remap color order if needed
-            when (colorOrder.uppercase()) {
-                "GRB" -> {
-                    for (i in 0 until ledCount) {
+            val order = parseColorOrder(colorOrder)
+            when (order) {
+                ORDER_GRB -> {
+                    for (i in 0 until count) {
                         val src = i * 3
                         val dst = 2 + i * 3
                         packetBuffer[dst] = rgb[src + 1]     // G
@@ -303,8 +312,8 @@ class WledUdpSender {
                         packetBuffer[dst + 2] = rgb[src + 2] // B
                     }
                 }
-                "BGR" -> {
-                    for (i in 0 until ledCount) {
+                ORDER_BGR -> {
+                    for (i in 0 until count) {
                         val src = i * 3
                         val dst = 2 + i * 3
                         packetBuffer[dst] = rgb[src + 2]     // B
@@ -312,8 +321,8 @@ class WledUdpSender {
                         packetBuffer[dst + 2] = rgb[src]     // R
                     }
                 }
-                "BRG" -> {
-                    for (i in 0 until ledCount) {
+                ORDER_BRG -> {
+                    for (i in 0 until count) {
                         val src = i * 3
                         val dst = 2 + i * 3
                         packetBuffer[dst] = rgb[src + 2]     // B
@@ -321,8 +330,8 @@ class WledUdpSender {
                         packetBuffer[dst + 2] = rgb[src + 1] // G
                     }
                 }
-                "RBG" -> {
-                    for (i in 0 until ledCount) {
+                ORDER_RBG -> {
+                    for (i in 0 until count) {
                         val src = i * 3
                         val dst = 2 + i * 3
                         packetBuffer[dst] = rgb[src]         // R
@@ -330,8 +339,8 @@ class WledUdpSender {
                         packetBuffer[dst + 2] = rgb[src + 1] // G
                     }
                 }
-                "GBR" -> {
-                    for (i in 0 until ledCount) {
+                ORDER_GBR -> {
+                    for (i in 0 until count) {
                         val src = i * 3
                         val dst = 2 + i * 3
                         packetBuffer[dst] = rgb[src + 1]     // G
@@ -341,7 +350,7 @@ class WledUdpSender {
                 }
                 else -> {
                     // Standard RGB
-                    System.arraycopy(rgb, 0, packetBuffer, 2, ledCount * 3)
+                    System.arraycopy(rgb, 0, packetBuffer, 2, count * 3)
                 }
             }
 
@@ -349,14 +358,17 @@ class WledUdpSender {
                 it.length = requiredSize
                 currentSocket.send(it)
             }
+            return 1
         } catch (e: SocketException) {
             handleSocketException(e, cleanIp)
+            return 0
         } catch (e: Exception) {
             val now = System.currentTimeMillis()
             if (now - lastErrorTime > 3000L) {
                 Log.w(TAG, "Failed to send DRGB UDP frame to $cleanIp: ${e.message}")
                 lastErrorTime = now
             }
+            return 0
         }
     }
 
@@ -366,6 +378,7 @@ class WledUdpSender {
      *   Byte 0: 0x01 (WARLS protocol)
      *   Byte 1: timeout in seconds
      *   Byte 2..N: [Index, R, G, B, Index, R, G, B, ...]
+     * Returns 1 on success, 0 on failure.
      */
     fun sendWarlsFrame(
         ip: String,
@@ -374,10 +387,10 @@ class WledUdpSender {
         rgb: ByteArray,
         ledCount: Int,
         colorOrder: String = "RGB"
-    ) {
+    ): Int {
         val cleanIp = ip.trim()
         val count = ledCount.coerceAtMost(255)
-        if (cleanIp.isBlank() || count <= 0 || rgb.size < count * 3) return
+        if (cleanIp.isBlank() || count <= 0 || rgb.size < count * 3) return 0
 
         try {
             val currentSocket = ensureSocket()
@@ -406,6 +419,7 @@ class WledUdpSender {
             packetBuffer[0] = 0x01 // WARLS protocol identifier
             packetBuffer[1] = timeoutSeconds
 
+            val order = parseColorOrder(colorOrder)
             var dst = 2
             for (i in 0 until count) {
                 val src = i * 3
@@ -413,12 +427,12 @@ class WledUdpSender {
                 val r = rgb[src]
                 val g = rgb[src + 1]
                 val b = rgb[src + 2]
-                when (colorOrder.uppercase()) {
-                    "GRB" -> { packetBuffer[dst++] = g; packetBuffer[dst++] = r; packetBuffer[dst++] = b }
-                    "BGR" -> { packetBuffer[dst++] = b; packetBuffer[dst++] = g; packetBuffer[dst++] = r }
-                    "BRG" -> { packetBuffer[dst++] = b; packetBuffer[dst++] = r; packetBuffer[dst++] = g }
-                    "RBG" -> { packetBuffer[dst++] = r; packetBuffer[dst++] = b; packetBuffer[dst++] = g }
-                    "GBR" -> { packetBuffer[dst++] = g; packetBuffer[dst++] = b; packetBuffer[dst++] = r }
+                when (order) {
+                    ORDER_GRB -> { packetBuffer[dst++] = g; packetBuffer[dst++] = r; packetBuffer[dst++] = b }
+                    ORDER_BGR -> { packetBuffer[dst++] = b; packetBuffer[dst++] = g; packetBuffer[dst++] = r }
+                    ORDER_BRG -> { packetBuffer[dst++] = b; packetBuffer[dst++] = r; packetBuffer[dst++] = g }
+                    ORDER_RBG -> { packetBuffer[dst++] = r; packetBuffer[dst++] = b; packetBuffer[dst++] = g }
+                    ORDER_GBR -> { packetBuffer[dst++] = g; packetBuffer[dst++] = b; packetBuffer[dst++] = r }
                     else -> { packetBuffer[dst++] = r; packetBuffer[dst++] = g; packetBuffer[dst++] = b }
                 }
             }
@@ -427,14 +441,17 @@ class WledUdpSender {
                 it.length = requiredSize
                 currentSocket.send(it)
             }
+            return 1
         } catch (e: SocketException) {
             handleSocketException(e, cleanIp)
+            return 0
         } catch (e: Exception) {
             val now = System.currentTimeMillis()
             if (now - lastErrorTime > 3000L) {
                 Log.w(TAG, "Failed to send WARLS UDP frame to $cleanIp: ${e.message}")
                 lastErrorTime = now
             }
+            return 0
         }
     }
 
@@ -481,6 +498,7 @@ class WledUdpSender {
 
         const val DDP_PORT = 4048
         const val DRGB_PORT = 21324
+        const val MAX_DRGB_LEDS = 490 // Max LEDs in 1 UDP packet (1472 bytes <= 1500 MTU)
 
         const val DDP_HEADER_LEN = 10
         const val DDP_MAX_CHANNELS_PER_PACKET = 1440 // 480 RGB or 360 RGBW LEDs per packet
@@ -490,5 +508,21 @@ class WledUdpSender {
         const val DDP_TYPE_RGB = 0x01
         const val DDP_TYPE_RGBW = 0x02
         const val DDP_ID_DEFAULT = 0x01
+
+        private const val ORDER_RGB = 0
+        private const val ORDER_GRB = 1
+        private const val ORDER_BGR = 2
+        private const val ORDER_BRG = 3
+        private const val ORDER_RBG = 4
+        private const val ORDER_GBR = 5
+
+        private fun parseColorOrder(colorOrder: String): Int = when (colorOrder.trim().uppercase()) {
+            "GRB" -> ORDER_GRB
+            "BGR" -> ORDER_BGR
+            "BRG" -> ORDER_BRG
+            "RBG" -> ORDER_RBG
+            "GBR" -> ORDER_GBR
+            else -> ORDER_RGB
+        }
     }
 }

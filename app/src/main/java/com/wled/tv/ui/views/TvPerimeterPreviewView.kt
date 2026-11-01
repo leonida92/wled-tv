@@ -4,7 +4,6 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.PointF
 import android.graphics.RectF
 import android.util.AttributeSet
 import android.view.View
@@ -35,6 +34,12 @@ class TvPerimeterPreviewView @JvmOverloads constructor(
         style = Paint.Style.STROKE
         strokeWidth = 2.5f
     }
+
+    private val reusableHsv = FloatArray(3).apply {
+        this[1] = 0.85f
+        this[2] = 0.95f
+    }
+    private val reusableCustomBoxRect = RectF()
 
     private val tvScreenPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#05050A")
@@ -253,9 +258,10 @@ class TvPerimeterPreviewView @JvmOverloads constructor(
                     val b = colors[index * 3 + 2].toInt() and 0xFF
                     return Color.rgb(r, g, b)
                 }
-                // Idle multi-chroma ambient gradient
+                // Idle multi-chroma ambient gradient (zero allocation)
                 val hue = if (total > 1) (index.toFloat() / total) * 360f else (deviceIndex * 70f) % 360f
-                return Color.HSVToColor(floatArrayOf(hue, 0.85f, 0.95f))
+                reusableHsv[0] = hue
+                return Color.HSVToColor(reusableHsv)
             }
 
             fun drawDiode(x: Float, y: Float, index: Int, total: Int, radius: Float) {
@@ -464,7 +470,7 @@ class TvPerimeterPreviewView @JvmOverloads constructor(
 
                 DeviceType.CUSTOM_BOX -> {
                     val region = device.customRect
-                    val boxRect = RectF(
+                    reusableCustomBoxRect.set(
                         screenRect.left + (region.left * screenRect.width()),
                         screenRect.top + (region.top * screenRect.height()),
                         screenRect.left + (region.right * screenRect.width()),
@@ -474,8 +480,8 @@ class TvPerimeterPreviewView @JvmOverloads constructor(
                     zoneBoxPaint.color = color
                     zoneFillPaint.color = color
                     zoneFillPaint.alpha = 50
-                    canvas.drawRoundRect(boxRect, 6f, 6f, zoneFillPaint)
-                    canvas.drawRoundRect(boxRect, 6f, 6f, zoneBoxPaint)
+                    canvas.drawRoundRect(reusableCustomBoxRect, 6f, 6f, zoneFillPaint)
+                    canvas.drawRoundRect(reusableCustomBoxRect, 6f, 6f, zoneBoxPaint)
                 }
             }
         }

@@ -27,6 +27,7 @@ import com.wled.tv.model.WledDevice
 import com.wled.tv.network.WledHttpClient
 import com.wled.tv.network.WledUdpSender
 import com.wled.tv.service.AmbientCaptureService
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -784,29 +785,35 @@ class EditDeviceActivity : AppCompatActivity() {
             .setTitle("Delete Light")
             .setMessage("Are you sure you want to delete '${currentDevice.name}'?")
             .setPositiveButton("Delete") { _, _ ->
-                val updatedDevices = config.devices.filter { it.id != currentDevice.id }
+                val deviceToDelete = currentDevice
+                val updatedDevices = config.devices.filter { it.id != deviceToDelete.id }
                 config = config.copy(devices = updatedDevices)
                 prefsRepo.saveConfig(config)
                 isSaved = true
 
-                lifecycleScope.launch(Dispatchers.IO) {
-                    val totalLeds = currentDevice.totalLeds
-                    if (totalLeds > 0) {
-                        udpSender.sendDeviceFrame(
-                            device = currentDevice,
-                            rgb = ByteArray(totalLeds * 3),
-                            ledCount = totalLeds,
-                            timeoutSeconds = 2
-                        )
+                CoroutineScope(Dispatchers.IO).launch {
+                    val oneShotSender = WledUdpSender()
+                    try {
+                        val totalLeds = deviceToDelete.totalLeds
+                        if (totalLeds > 0) {
+                            oneShotSender.sendDeviceFrame(
+                                device = deviceToDelete,
+                                rgb = ByteArray(totalLeds * 3),
+                                ledCount = totalLeds,
+                                timeoutSeconds = 2
+                            )
+                        }
+                        httpClient.turnOff(deviceToDelete.ip)
+                    } finally {
+                        oneShotSender.close()
                     }
-                    httpClient.turnOff(currentDevice.ip)
                 }
 
                 if (AmbientCaptureService.isRunning) {
                     AmbientCaptureService.currentServiceInstance?.reloadConfig()
                 }
 
-                Toast.makeText(this, "Deleted ${currentDevice.name}", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Deleted ${deviceToDelete.name}", Toast.LENGTH_SHORT).show()
                 finish()
             }
             .setNegativeButton("Cancel", null)
@@ -847,7 +854,9 @@ class EditDeviceActivity : AppCompatActivity() {
         Toast.makeText(this, "Identifying ${currentDevice.name} ($ip)...", Toast.LENGTH_SHORT).show()
 
         testJob = lifecycleScope.launch(Dispatchers.IO) {
-            val totalLeds = currentDevice.totalLeds
+            AmbientCaptureService.isTestingOverride = true
+            try {
+                val totalLeds = currentDevice.totalLeds
             val whiteFrame = ByteArray(totalLeds * 3) { (255).toByte() }
             val blackFrame = ByteArray(totalLeds * 3)
 
@@ -872,6 +881,9 @@ class EditDeviceActivity : AppCompatActivity() {
                 httpClient.wakeAndSetBrightness(ip, currentDevice.calibration.maxBrightness)
             } else {
                 httpClient.turnOff(ip)
+            }
+            } finally {
+                AmbientCaptureService.isTestingOverride = false
             }
         }
     }

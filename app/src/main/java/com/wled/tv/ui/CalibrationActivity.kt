@@ -245,11 +245,10 @@ class CalibrationActivity : AppCompatActivity() {
         AmbientCaptureService.isTestingOverride = true
 
         testColorJob = lifecycleScope.launch(Dispatchers.IO) {
-            val dev = targetDevice
-            val leds = dev.totalLeds
-            if (leds <= 0) return@launch
-
             while (isActive && activeTestColor != null) {
+                val dev = targetDevice
+                val leds = dev.totalLeds
+                if (leds <= 0) break
                 val color = activeTestColor ?: break
                 val c = dev.calibration
                 val briScale = c.maxBrightness / 255f

@@ -5,7 +5,6 @@ import android.graphics.Color
 import android.os.Bundle
 import android.view.KeyEvent
 import android.view.View
-import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -93,7 +92,19 @@ class CornerFinderActivity : AppCompatActivity() {
         sendSinglePixel(currentLedIndex)
     }
 
+    override fun onResume() {
+        super.onResume()
+        AmbientCaptureService.isTestingOverride = true
+    }
+
+    override fun onPause() {
+        super.onPause()
+        AmbientCaptureService.isTestingOverride = false
+    }
+
     override fun onDestroy() {
+        super.onDestroy()
+        AmbientCaptureService.isTestingOverride = false
         super.onDestroy()
         turnOffLeds()
         udpSender.close()

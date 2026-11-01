@@ -41,7 +41,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
-import java.util.concurrent.ConcurrentHashMap
+
 
 class MainActivity : AppCompatActivity(),
     AmbientCaptureService.LiveFrameListener,
@@ -295,6 +295,10 @@ class MainActivity : AppCompatActivity(),
         updatedList[position] = updatedDevice
         config = config.copy(devices = updatedList)
         prefsRepo.saveConfig(config)
+
+        if (AmbientCaptureService.isRunning) {
+            AmbientCaptureService.currentServiceInstance?.reloadConfig()
+        }
 
         renderDeviceDock()
         tvPreviewView.updateDevices(config.devices)
