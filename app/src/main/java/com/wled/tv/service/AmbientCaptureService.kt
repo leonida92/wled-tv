@@ -78,7 +78,8 @@ import com.wled.tv.engine.AmbientStreamingEngine
 
 import com.wled.tv.model.WledConfig
 
-import com.wled.tv.network.WledHttpClient
+import com.wled.tv.network.DefaultWledControllerClient
+import com.wled.tv.network.WledControllerClient
 
 import com.wled.tv.ui.MainActivity
 
@@ -122,9 +123,11 @@ class AmbientCaptureService : Service() {
 
     private lateinit var configRepo: ConfigRepository
 
-    private var config: WledConfig = WledConfig()
+    @androidx.annotation.VisibleForTesting
+    internal var config: WledConfig = WledConfig()
 
-    private var engine: AmbientStreamingEngine? = null
+    @androidx.annotation.VisibleForTesting
+    internal var engine: AmbientStreamingEngine? = null
 
 
 
@@ -152,7 +155,8 @@ class AmbientCaptureService : Service() {
 
 
 
-    private val fallbackHttpClient = WledHttpClient()
+    @androidx.annotation.VisibleForTesting
+    internal var fallbackControllerClient: WledControllerClient = DefaultWledControllerClient.getInstance()
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -1039,7 +1043,12 @@ class AmbientCaptureService : Service() {
 
                 try {
 
-                    engine?.blackout(sendPowerOff = true)
+                    val currentEngine = engine
+                    if (currentEngine != null) {
+                        currentEngine.blackout(sendPowerOff = true)
+                    } else {
+                        fallbackControllerClient.blackoutFleet(config.enabledDevices, true)
+                    }
 
                 } catch (e: Exception) {
 
@@ -1083,34 +1092,24 @@ class AmbientCaptureService : Service() {
 
 
 
-    private fun ensureWledAwake() {
-
-        val client = engine?.httpClient ?: fallbackHttpClient
-
+    internal fun wakeFixtures() {
+        val client = engine?.controllerClient ?: fallbackControllerClient
         val devices = (engine?.config ?: config).enabledDevices
-
         serviceScope.launch {
-
             for (device in devices) {
-
                 launch {
-
                     for (attempt in 1..3) {
-
-                        val success = client.wakeAndSetBrightness(device.ip, device.calibration.maxBrightness)
-
+                        val success = client.wakeAndSetBrightness(device)
                         if (success) break
-
                         delay(1000L)
-
                     }
-
                 }
-
             }
-
         }
+    }
 
+    private fun ensureWledAwake() {
+        wakeFixtures()
     }
 
 
@@ -1407,7 +1406,11 @@ class AmbientCaptureService : Service() {
 
             try {
 
-                currentEngine?.blackout(sendPowerOff = true)
+                if (currentEngine != null) {
+                    currentEngine.blackout(sendPowerOff = true)
+                } else {
+                    fallbackControllerClient.blackoutFleet(config.enabledDevices, true)
+                }
 
             } catch (e: Exception) {
 

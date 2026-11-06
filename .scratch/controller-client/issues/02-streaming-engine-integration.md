@@ -4,11 +4,11 @@
 
 **Blocked by:** 01 (Unified WledControllerClient Interface, Default Implementation & Test Double)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `AmbientStreamingEngine` constructor accepts `controllerClient: WledControllerClient = DefaultWledControllerClient.getInstance()` and eliminates separate `udpSender` / `httpClient` parameters.
-- [ ] `tickStreaming` invokes `controllerClient.sendFrame(device, smoothBuf, leds)`.
-- [ ] `blackout` delegates directly to `controllerClient.blackoutFleet(config.enabledDevices, sendPowerOff)`.
-- [ ] `close` delegates to `controllerClient.close()`.
-- [ ] `AmbientCaptureService` uses `DefaultWledControllerClient.getInstance()` instead of instantiating `fallbackHttpClient = WledHttpClient()`.
-- [ ] `AmbientStreamingEngineTest` and `AmbientCaptureServiceAdapterTest` pass using `FakeWledControllerClient`.
+- [x] `AmbientStreamingEngine` constructor accepts `controllerClient: WledControllerClient = DefaultWledControllerClient.getInstance()` and eliminates separate `udpSender` / `httpClient` parameters.
+- [x] `tickStreaming` invokes `controllerClient.sendFrame(device, smoothBuf, leds)`.
+- [x] `blackout` delegates directly to `controllerClient.blackoutFleet(config.enabledDevices, sendPowerOff)`.
+- [x] `close` delegates to `controllerClient.close()`.
+- [x] `AmbientCaptureService` uses `DefaultWledControllerClient.getInstance()` instead of instantiating `fallbackHttpClient = WledHttpClient()`.
+- [x] `AmbientStreamingEngineTest` and `AmbientCaptureServiceAdapterTest` pass using `FakeWledControllerClient`.

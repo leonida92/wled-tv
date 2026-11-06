@@ -7,14 +7,14 @@ import com.wled.tv.model.ThroughputHistoryPoint
 import com.wled.tv.model.ThroughputStats
 import com.wled.tv.model.WledConfig
 import com.wled.tv.model.WledDevice
-import com.wled.tv.network.WledHttpClient
-import com.wled.tv.network.WledUdpSender
+import com.wled.tv.network.FakeWledControllerClient
 import com.wled.tv.processing.ScreenColorProcessor
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNotSame
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -24,56 +24,14 @@ import java.nio.ByteBuffer
 class AmbientStreamingEngineTest {
 
     private lateinit var clock: TestClock
-    private lateinit var fakeUdpSender: FakeUdpSender
-    private lateinit var fakeHttpClient: FakeHttpClient
+    private lateinit var fakeControllerClient: FakeWledControllerClient
     private lateinit var colorProcessor: ScreenColorProcessor
     private var isAudioActiveFlag = false
-
-    private class FakeUdpSender : WledUdpSender() {
-        var sendFrameCallCount = 0
-        val sentFrames = mutableListOf<SentFrame>()
-
-        data class SentFrame(
-            val ip: String,
-            val port: Int,
-            val protocol: StreamingProtocol,
-            val rgbCopy: ByteArray,
-            val ledCount: Int
-        )
-
-        override fun sendFrame(
-            ip: String,
-            port: Int,
-            protocol: StreamingProtocol,
-            rgb: ByteArray,
-            ledCount: Int,
-            colorOrder: String,
-            isRgbw: Boolean,
-            rgbwMode: String,
-            timeoutSeconds: Byte
-        ): Int {
-            sendFrameCallCount++
-            sentFrames.add(SentFrame(ip, port, protocol, rgb.copyOf(ledCount * 3), ledCount))
-            return 1
-        }
-    }
-
-    private class FakeHttpClient : WledHttpClient() {
-        var turnOffCallCount = 0
-        val turnedOffIps = mutableListOf<String>()
-
-        override suspend fun turnOff(ip: String): Boolean {
-            turnOffCallCount++
-            turnedOffIps.add(ip)
-            return true
-        }
-    }
 
     @Before
     fun setUp() {
         clock = TestClock(currentTime = 1000L, uptime = 1000L)
-        fakeUdpSender = FakeUdpSender()
-        fakeHttpClient = FakeHttpClient()
+        fakeControllerClient = FakeWledControllerClient()
         colorProcessor = ScreenColorProcessor()
         isAudioActiveFlag = false
     }
@@ -117,8 +75,7 @@ class AmbientStreamingEngineTest {
         val engine = AmbientStreamingEngine(
             initialConfig = config,
             colorProcessor = colorProcessor,
-            udpSender = fakeUdpSender,
-            httpClient = fakeHttpClient,
+            controllerClient = fakeControllerClient,
             clock = clock,
             isAudioActive = { isAudioActiveFlag }
         )
@@ -154,8 +111,7 @@ class AmbientStreamingEngineTest {
         val engine = AmbientStreamingEngine(
             initialConfig = config,
             colorProcessor = colorProcessor,
-            udpSender = fakeUdpSender,
-            httpClient = fakeHttpClient,
+            controllerClient = fakeControllerClient,
             clock = clock,
             isAudioActive = { isAudioActiveFlag }
         )
@@ -194,8 +150,7 @@ class AmbientStreamingEngineTest {
         val engine = AmbientStreamingEngine(
             initialConfig = config,
             colorProcessor = colorProcessor,
-            udpSender = fakeUdpSender,
-            httpClient = fakeHttpClient,
+            controllerClient = fakeControllerClient,
             clock = clock
         )
 
@@ -226,8 +181,7 @@ class AmbientStreamingEngineTest {
         val engine = AmbientStreamingEngine(
             initialConfig = config,
             colorProcessor = colorProcessor,
-            udpSender = fakeUdpSender,
-            httpClient = fakeHttpClient,
+            controllerClient = fakeControllerClient,
             clock = clock,
             isAudioActive = { isAudioActiveFlag }
         )
@@ -254,23 +208,23 @@ class AmbientStreamingEngineTest {
         assertTrue("DRM blackout should trigger after 5 seconds of black frames with active audio", engine.isDrmActive)
 
         // Verify keepalive throttling: first tick in DRM sends keepalive frame
-        fakeUdpSender.sendFrameCallCount = 0
+        fakeControllerClient.clear()
         engine.tickStreaming()
-        assertEquals("First DRM tick should send a keepalive packet", 1, fakeUdpSender.sendFrameCallCount)
+        assertEquals("First DRM tick should send a keepalive packet", 1, fakeControllerClient.sentFrames.size)
 
         // Ticks within next 1500ms should be suppressed
         clock.advance(500L)
         engine.tickStreaming()
-        assertEquals("Subsequent ticks within 1500ms should be suppressed", 1, fakeUdpSender.sendFrameCallCount)
+        assertEquals("Subsequent ticks within 1500ms should be suppressed", 1, fakeControllerClient.sentFrames.size)
 
         clock.advance(900L) // 1400ms since last keepalive
         engine.tickStreaming()
-        assertEquals("Subsequent ticks within 1500ms should be suppressed", 1, fakeUdpSender.sendFrameCallCount)
+        assertEquals("Subsequent ticks within 1500ms should be suppressed", 1, fakeControllerClient.sentFrames.size)
 
         // At 1500ms, another keepalive is transmitted
         clock.advance(100L) // 1500ms since last keepalive
         engine.tickStreaming()
-        assertEquals("Keepalive packet sent when 1500ms elapsed", 2, fakeUdpSender.sendFrameCallCount)
+        assertEquals("Keepalive packet sent when 1500ms elapsed", 2, fakeControllerClient.sentFrames.size)
 
         // Immediate recovery when active video resumes
         clock.advance(16L)
@@ -280,7 +234,7 @@ class AmbientStreamingEngineTest {
         // Normal 60Hz streaming resumes without 1500ms throttling
         clock.advance(16L)
         engine.tickStreaming()
-        assertEquals("Streaming should immediately resume at 60Hz", 3, fakeUdpSender.sendFrameCallCount)
+        assertEquals("Streaming should immediately resume at 60Hz", 3, fakeControllerClient.sentFrames.size)
     }
 
     @Test
@@ -290,8 +244,7 @@ class AmbientStreamingEngineTest {
         val engine = AmbientStreamingEngine(
             initialConfig = config,
             colorProcessor = colorProcessor,
-            udpSender = fakeUdpSender,
-            httpClient = fakeHttpClient,
+            controllerClient = fakeControllerClient,
             clock = clock,
             isAudioActive = { isAudioActiveFlag }
         )
@@ -313,8 +266,7 @@ class AmbientStreamingEngineTest {
         val engine = AmbientStreamingEngine(
             initialConfig = config,
             colorProcessor = colorProcessor,
-            udpSender = fakeUdpSender,
-            httpClient = fakeHttpClient,
+            controllerClient = fakeControllerClient,
             clock = clock
         )
 
@@ -323,16 +275,16 @@ class AmbientStreamingEngineTest {
         engine.onFrameAvailable(frame, 320, 180, 320 * 4, 4)
         engine.tickStreaming()
 
-        fakeUdpSender.sendFrameCallCount = 0
-        fakeHttpClient.turnOffCallCount = 0
+        fakeControllerClient.clear()
 
         // Execute blackout with sendPowerOff = true
         engine.blackout(sendPowerOff = true)
 
+        assertEquals(1, fakeControllerClient.blackoutCalls)
         // 3 black frame burst packets sent
-        assertEquals(3, fakeUdpSender.sendFrameCallCount)
-        assertEquals(1, fakeHttpClient.turnOffCallCount)
-        assertEquals("192.168.1.50", fakeHttpClient.turnedOffIps[0])
+        assertEquals(3, fakeControllerClient.sentFrames.size)
+        assertEquals(false, fakeControllerClient.powerState["192.168.1.50"])
+        assertEquals(listOf(config.enabledDevices), fakeControllerClient.blackoutDevices)
 
         // Buffers should be zeroed
         val devBuf = engine.getDeviceBuffer("dev1")
@@ -340,11 +292,11 @@ class AmbientStreamingEngineTest {
         assertTrue(devBuf!!.all { it == 0.toByte() })
 
         // Blackout with sendPowerOff = false should not call HTTP turnOff
-        fakeUdpSender.sendFrameCallCount = 0
-        fakeHttpClient.turnOffCallCount = 0
+        fakeControllerClient.clear()
         engine.blackout(sendPowerOff = false)
-        assertEquals(3, fakeUdpSender.sendFrameCallCount)
-        assertEquals(0, fakeHttpClient.turnOffCallCount)
+        assertEquals(1, fakeControllerClient.blackoutCalls)
+        assertEquals(3, fakeControllerClient.sentFrames.size)
+        assertNull(fakeControllerClient.powerState["192.168.1.50"])
     }
 
     @Test
@@ -353,8 +305,7 @@ class AmbientStreamingEngineTest {
         val engine = AmbientStreamingEngine(
             initialConfig = config,
             colorProcessor = colorProcessor,
-            udpSender = fakeUdpSender,
-            httpClient = fakeHttpClient,
+            controllerClient = fakeControllerClient,
             clock = clock
         )
 
@@ -364,9 +315,9 @@ class AmbientStreamingEngineTest {
         val accepted = engine.onFrameAvailable(frame, 320, 180, 320 * 4, 4)
         assertFalse("Testing override should suppress frame intake", accepted)
 
-        fakeUdpSender.sendFrameCallCount = 0
+        fakeControllerClient.clear()
         engine.tickStreaming()
-        assertEquals("Testing override should suppress UDP transmission", 0, fakeUdpSender.sendFrameCallCount)
+        assertEquals("Testing override should suppress UDP transmission", 0, fakeControllerClient.sentFrames.size)
 
         engine.isTestingOverride = false
         clock.advance(20L)
@@ -375,7 +326,7 @@ class AmbientStreamingEngineTest {
 
         clock.advance(16L)
         engine.tickStreaming()
-        assertEquals("Disabling testing override restores UDP transmission", 1, fakeUdpSender.sendFrameCallCount)
+        assertEquals("Disabling testing override restores UDP transmission", 1, fakeControllerClient.sentFrames.size)
     }
 
     @Test
@@ -384,8 +335,7 @@ class AmbientStreamingEngineTest {
         val engine = AmbientStreamingEngine(
             initialConfig = config,
             colorProcessor = colorProcessor,
-            udpSender = fakeUdpSender,
-            httpClient = fakeHttpClient,
+            controllerClient = fakeControllerClient,
             clock = clock
         )
 
@@ -458,7 +408,7 @@ class AmbientStreamingEngineTest {
             id = "overlay_dev_1",
             name = "TV Perimeter",
             ip = "192.168.1.150",
-            type = DeviceType.LEFT_AMBIENT,
+            type = DeviceType.LEFT_AMBIENT,
             ledCount = 10,
             enabled = true
         )
@@ -466,8 +416,7 @@ class AmbientStreamingEngineTest {
         val engine = AmbientStreamingEngine(
             initialConfig = config,
             colorProcessor = colorProcessor,
-            udpSender = fakeUdpSender,
-            httpClient = fakeHttpClient,
+            controllerClient = fakeControllerClient,
             clock = clock,
             isAudioActive = { isAudioActiveFlag }
         )
@@ -484,5 +433,19 @@ class AmbientStreamingEngineTest {
         assertEquals("overlay_dev_1", fullSnapshot.devices[0].deviceId)
         assertEquals(0f, fullSnapshot.topCrop)
         assertFalse(fullSnapshot.isDrmActive)
+    }
+
+    @Test
+    fun testClose_delegatesToControllerClient() {
+        val config = createDefaultConfig()
+        val engine = AmbientStreamingEngine(
+            initialConfig = config,
+            colorProcessor = colorProcessor,
+            controllerClient = fakeControllerClient,
+            clock = clock
+        )
+        assertFalse(fakeControllerClient.isClosed)
+        engine.close()
+        assertTrue(fakeControllerClient.isClosed)
     }
 }
