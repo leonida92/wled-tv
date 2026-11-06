@@ -10,7 +10,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
-open class WledHttpClient(
+internal open class WledHttpClient(
     private val client: OkHttpClient = sharedClient
 ) {
 
@@ -77,7 +77,7 @@ open class WledHttpClient(
         }
     }
 
-    suspend fun getInfo(ip: String): JSONObject? = withContext(Dispatchers.IO) {
+    open suspend fun getInfo(ip: String): JSONObject? = withContext(Dispatchers.IO) {
         val cleanIp = ip.trim()
         if (cleanIp.isBlank()) return@withContext null
         try {
@@ -98,7 +98,7 @@ open class WledHttpClient(
         }
     }
 
-    suspend fun fetchDeviceInfo(ip: String): WledDeviceInfo? = withContext(Dispatchers.IO) {
+    open suspend fun fetchDeviceInfo(ip: String): WledDeviceInfo? = withContext(Dispatchers.IO) {
         val json = getInfo(ip) ?: return@withContext null
         try {
             val name = json.optString("name", "WLED Light")

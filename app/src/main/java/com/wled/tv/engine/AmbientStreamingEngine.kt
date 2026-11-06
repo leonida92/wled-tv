@@ -6,10 +6,9 @@ import com.wled.tv.model.WledDevice
 import com.wled.tv.model.ThroughputHistoryPoint
 import com.wled.tv.model.ThroughputStats
 import com.wled.tv.model.WledConfig
-import com.wled.tv.network.WledHttpClient
-import com.wled.tv.network.WledUdpSender
+import com.wled.tv.network.DefaultWledControllerClient
+import com.wled.tv.network.WledControllerClient
 import com.wled.tv.processing.ScreenColorProcessor
-import kotlinx.coroutines.delay
 import java.nio.ByteBuffer
 
 data class DeviceOverlaySnapshot(
@@ -62,8 +61,7 @@ data class EngineOverlaySnapshot(
 class AmbientStreamingEngine(
     initialConfig: WledConfig = WledConfig(),
     val colorProcessor: ScreenColorProcessor = ScreenColorProcessor(),
-    val udpSender: WledUdpSender = WledUdpSender(),
-    val httpClient: WledHttpClient = WledHttpClient(),
+    val controllerClient: WledControllerClient = DefaultWledControllerClient.getInstance(),
     private val clock: Clock = SystemClock(),
     private val isAudioActive: () -> Boolean = { false }
 ) {
@@ -338,17 +336,7 @@ class AmbientStreamingEngine(
                     )
 
                     // Transmit smoothed frame to WLED via configured protocol (DDP / DRGB / WARLS)
-                    val packetsSent = udpSender.sendFrame(
-                        ip = device.ip,
-                        port = device.port,
-                        protocol = device.protocol,
-                        rgb = smoothBuf,
-                        ledCount = leds,
-                        colorOrder = device.calibration.colorOrder,
-                        isRgbw = device.calibration.isRgbw,
-                        rgbwMode = device.calibration.rgbwMode,
-                        timeoutSeconds = 5
-                    )
+                    val packetsSent = controllerClient.sendFrame(device, smoothBuf, leds)
                     if (packetsSent > 0) {
                         recordPacketSent(device.id, packetsSent)
                     }
@@ -479,35 +467,13 @@ class AmbientStreamingEngine(
         }
         colorProcessor.reset()
 
-        for (device in devices) {
-            val leds = device.totalLeds
-            if (leds > 0) {
-                val blackBuf = deviceBuffers[device.id] ?: ByteArray(leds * 3)
-                for (i in 0..2) {
-                    udpSender.sendFrame(
-                        ip = device.ip,
-                        port = device.port,
-                        protocol = device.protocol,
-                        rgb = blackBuf,
-                        ledCount = leds,
-                        colorOrder = device.calibration.colorOrder,
-                        isRgbw = device.calibration.isRgbw,
-                        rgbwMode = device.calibration.rgbwMode,
-                        timeoutSeconds = 1
-                    )
-                    delay(30L)
-                }
-            }
-            if (sendPowerOff) {
-                httpClient.turnOff(device.ip)
-            }
-        }
+        controllerClient.blackoutFleet(devices, sendPowerOff)
     }
 
     /**
      * Closes underlying network sockets and resources.
      */
     fun close() {
-        udpSender.close()
+        controllerClient.close()
     }
 }

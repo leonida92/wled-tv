@@ -16,7 +16,8 @@ import com.wled.tv.model.CalculatedPerimeter
 import com.wled.tv.model.PerimeterCalculator
 import com.wled.tv.model.WledConfig
 import com.wled.tv.model.WledDevice
-import com.wled.tv.network.WledUdpSender
+import com.wled.tv.network.DefaultWledControllerClient
+import com.wled.tv.network.WledControllerClient
 import com.wled.tv.service.AmbientCaptureService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -28,7 +29,7 @@ class CornerFinderActivity : AppCompatActivity() {
     private var targetDeviceId: String? = null
     private lateinit var targetDevice: WledDevice
 
-    private val udpSender = WledUdpSender()
+    private val controllerClient: WledControllerClient = DefaultWledControllerClient.getInstance()
     private var totalLeds: Int = 168
 
     // UI elements
@@ -106,7 +107,7 @@ class CornerFinderActivity : AppCompatActivity() {
         super.onDestroy()
         AmbientCaptureService.activeEngine.value?.isTestingOverride = false
         turnOffLeds()
-        udpSender.close()
+
     }
 
     private fun bindViews() {
@@ -340,7 +341,7 @@ class CornerFinderActivity : AppCompatActivity() {
 
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                udpSender.sendDeviceFrame(targetDevice, buffer, total, 2)
+                controllerClient.sendFrame(targetDevice, buffer, total)
             } catch (e: Exception) {
                 // Ignore transient network errors during jogging
             }
@@ -353,7 +354,7 @@ class CornerFinderActivity : AppCompatActivity() {
         val buffer = ByteArray(total * 3)
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                udpSender.sendDeviceFrame(targetDevice, buffer, total, 2)
+                controllerClient.sendFrame(targetDevice, buffer, total)
             } catch (e: Exception) {
                 // Ignore
             }

@@ -24,8 +24,8 @@ import com.wled.tv.model.Direction
 import com.wled.tv.model.StreamingProtocol
 import com.wled.tv.model.WledConfig
 import com.wled.tv.model.WledDevice
-import com.wled.tv.network.WledHttpClient
-import com.wled.tv.network.WledUdpSender
+import com.wled.tv.network.DefaultWledControllerClient
+import com.wled.tv.network.WledControllerClient
 import com.wled.tv.service.AmbientCaptureService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -68,8 +68,7 @@ class EditDeviceActivity : AppCompatActivity() {
     private lateinit var btnCancelEdit: Button
     private lateinit var btnSaveEdit: Button
 
-    private val udpSender = WledUdpSender()
-    private val httpClient = WledHttpClient()
+    private val controllerClient: WledControllerClient = DefaultWledControllerClient.getInstance()
     private var testJob: Job? = null
 
     private var isNewDevice = false
@@ -140,7 +139,6 @@ class EditDeviceActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         testJob?.cancel()
-        udpSender.close()
         if (isNewDevice && !isSaved) {
             // Clean up any temporary draft saved for sub-activities
             val draftId = currentDevice.id
@@ -239,7 +237,7 @@ class EditDeviceActivity : AppCompatActivity() {
 
             lifecycleScope.launch {
                 val start = System.currentTimeMillis()
-                val info = withContext(Dispatchers.IO) { httpClient.fetchDeviceInfo(ip) }
+                val info = controllerClient.fetchDeviceInfo(ip)
                 val duration = System.currentTimeMillis() - start
                 btnPingDevice.isEnabled = true
                 if (info != null) {
@@ -256,7 +254,7 @@ class EditDeviceActivity : AppCompatActivity() {
                         populateUi()
                     }
                 } else {
-                    val reachable = withContext(Dispatchers.IO) { httpClient.checkConnection(ip) }
+                    val reachable = controllerClient.checkConnection(ip)
                     if (reachable) {
                         tvPingStatus.text = "Online (${duration}ms response)"
                         tvPingStatus.setTextColor(Color.parseColor("#00E676"))
@@ -799,23 +797,7 @@ class EditDeviceActivity : AppCompatActivity() {
                     }
                     isSaved = true
 
-                    val oneShotSender = WledUdpSender()
-                    withContext(Dispatchers.IO) {
-                        try {
-                            val totalLeds = deviceToDelete.totalLeds
-                            if (totalLeds > 0) {
-                                oneShotSender.sendDeviceFrame(
-                                    device = deviceToDelete,
-                                    rgb = ByteArray(totalLeds * 3),
-                                    ledCount = totalLeds,
-                                    timeoutSeconds = 2
-                                )
-                            }
-                            httpClient.turnOff(deviceToDelete.ip)
-                        } finally {
-                            oneShotSender.close()
-                        }
-                    }
+                    controllerClient.blackoutFleet(listOf(deviceToDelete), sendPowerOff = true)
 
                     Toast.makeText(this@EditDeviceActivity, "Deleted ${deviceToDelete.name}", Toast.LENGTH_SHORT).show()
                     finish()
@@ -855,38 +837,19 @@ class EditDeviceActivity : AppCompatActivity() {
         testJob?.cancel()
         Toast.makeText(this, "Identifying ${currentDevice.name} ($ip)...", Toast.LENGTH_SHORT).show()
 
-        testJob = lifecycleScope.launch(Dispatchers.IO) {
+        testJob = lifecycleScope.launch {
             AmbientCaptureService.activeEngine.value?.isTestingOverride = true
-                try {
-                val totalLeds = currentDevice.totalLeds
-            val whiteFrame = ByteArray(totalLeds * 3) { (255).toByte() }
-            val blackFrame = ByteArray(totalLeds * 3)
-
-            for (flash in 1..3) {
-                if (!isActive) break
-                udpSender.sendDeviceFrame(
-                    device = currentDevice.copy(ip = ip),
-                    rgb = whiteFrame,
-                    ledCount = totalLeds,
-                    timeoutSeconds = 2
-                )
-                delay(300)
-                udpSender.sendDeviceFrame(
-                    device = currentDevice.copy(ip = ip),
-                    rgb = blackFrame,
-                    ledCount = totalLeds,
-                    timeoutSeconds = 2
-                )
-                delay(300)
-            }
-            if (currentDevice.enabled) {
-                httpClient.wakeAndSetBrightness(ip, currentDevice.calibration.maxBrightness)
-            } else {
-                httpClient.turnOff(ip)
-            }
+            try {
+                val targetDevice = currentDevice.copy(ip = ip)
+                controllerClient.flashDevice(targetDevice)
+                if (targetDevice.enabled) {
+                    controllerClient.wakeAndSetBrightness(targetDevice)
+                } else {
+                    controllerClient.turnOff(targetDevice.ip)
+                }
             } finally {
                 AmbientCaptureService.activeEngine.value?.isTestingOverride = false
-                    }
+            }
         }
     }
 

@@ -9,7 +9,7 @@ import java.net.InetAddress
 import java.net.SocketException
 import java.util.concurrent.ConcurrentHashMap
 
-open class WledUdpSender {
+internal open class WledUdpSender {
 
     @Volatile
     private var socket: DatagramSocket? = null
@@ -23,7 +23,7 @@ open class WledUdpSender {
      * Universal frame dispatcher for a configured WledDevice.
      * Returns the number of UDP datagrams successfully sent (0 on failure).
      */
-    fun sendDeviceFrame(
+    open fun sendDeviceFrame(
         device: WledDevice,
         rgb: ByteArray,
         ledCount: Int = device.totalLeds,

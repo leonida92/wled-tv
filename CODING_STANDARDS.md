@@ -10,6 +10,8 @@ Judgement calls and conventions for reviewing changes in `wled-tv`.
 
 ## Architecture & Seams
 
+- **Unified Controller Client:** All network interactions with WLED fixtures (UDP frame streaming, device power, brightness, reachability checks, device info, and blackout) must go through `WledControllerClient`. Activities and services must never instantiate raw `DatagramSocket`, `WledUdpSender`, or `WledHttpClient` directly.
+
 - **Service as thin adapter:** `AmbientCaptureService` is an Android OS adapter for hardware capture (`MediaProjection`, `VirtualDisplay`, `ImageReader`) and foreground service lifecycle. Core color processing, streaming cadence, Widevine DRM detection, and telemetry belong in `AmbientStreamingEngine`.
 - **Encapsulated snapshots:** Views (such as `SamplingOverlayView`) must not navigate across collaborators (`engine.colorProcessor...`). Expose and consume unified snapshot models (e.g. `engine.getOverlaySnapshot()`).
 - **Deterministic timing:** Time-sensitive modules must accept a `Clock` interface so fast-forwarding intervals can be verified in JVM unit tests without `Thread.sleep`.
