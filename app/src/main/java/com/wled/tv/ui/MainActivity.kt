@@ -32,8 +32,9 @@ import com.wled.tv.model.ThroughputStats
 import com.wled.tv.model.WledConfig
 import com.wled.tv.model.WledDevice
 import com.wled.tv.network.DeviceReachabilityCache
-import com.wled.tv.network.WledHttpClient
-import com.wled.tv.network.WledUdpSender
+import com.wled.tv.network.DefaultWledControllerClient
+import com.wled.tv.network.WledControllerClient
+
 import com.wled.tv.service.AmbientCaptureService
 import com.wled.tv.ui.views.PerformanceHistoryChartView
 import com.wled.tv.ui.views.TvPerimeterPreviewView
@@ -54,8 +55,8 @@ class MainActivity : AppCompatActivity(),
     private var activeEngine: AmbientStreamingEngine? = null
     private var config: WledConfig = WledConfig()
 
-    private val httpClient = WledHttpClient()
-    private val udpSender = WledUdpSender()
+    private val controllerClient: WledControllerClient = DefaultWledControllerClient.getInstance()
+
 
     private lateinit var btnPower: FrameLayout
     private lateinit var tvPowerText: TextView
@@ -198,7 +199,7 @@ class MainActivity : AppCompatActivity(),
 
     override fun onDestroy() {
         super.onDestroy()
-        udpSender.close()
+
     }
 
     private fun bindViews() {
@@ -348,25 +349,25 @@ class MainActivity : AppCompatActivity(),
 
         lifecycleScope.launch(Dispatchers.IO) {
             if (newEnabled) {
-                val isReachable = httpClient.checkConnection(updatedDevice.ip)
+                val isReachable = controllerClient.checkConnection(updatedDevice.ip)
                 deviceReachabilityMap[updatedDevice.id] = isReachable
                 withContext(Dispatchers.Main) {
                     updateDeviceDockDot(updatedDevice.id, true, isReachable)
                     updateUiState()
                 }
-                httpClient.wakeAndSetBrightness(updatedDevice.ip, updatedDevice.calibration.maxBrightness)
+                controllerClient.wakeAndSetBrightness(updatedDevice)
             } else {
                 val totalLeds = updatedDevice.totalLeds
                 if (totalLeds > 0) {
                     val blackBuffer = ByteArray(totalLeds * 3)
-                    udpSender.sendDeviceFrame(
+                    controllerClient.sendFrame(
                         device = updatedDevice,
                         rgb = blackBuffer,
                         ledCount = totalLeds,
-                        timeoutSeconds = 2
+
                     )
                 }
-                httpClient.turnOff(updatedDevice.ip)
+                controllerClient.turnOff(updatedDevice.ip)
                 withContext(Dispatchers.Main) {
                     updateDeviceDockDot(updatedDevice.id, false, null)
                     updateUiState()
@@ -468,11 +469,11 @@ class MainActivity : AppCompatActivity(),
                         testBuffer[idx + 2] = Color.blue(rgb).toByte()
                     }
 
-                    udpSender.sendDeviceFrame(
+                    controllerClient.sendFrame(
                         device = dev,
                         rgb = testBuffer,
                         ledCount = leds,
-                        timeoutSeconds = 2
+
                     )
 
                     launch(Dispatchers.Main) {
@@ -506,11 +507,11 @@ class MainActivity : AppCompatActivity(),
                 val leds = dev.totalLeds
                 if (leds > 0) {
                     val blackBuffer = ByteArray(leds * 3)
-                    udpSender.sendDeviceFrame(
+                    controllerClient.sendFrame(
                         device = dev,
                         rgb = blackBuffer,
                         ledCount = leds,
-                        timeoutSeconds = 1
+
                     )
                 }
             }
@@ -610,7 +611,7 @@ class MainActivity : AppCompatActivity(),
                 val devices = config.devices
                 for (dev in devices) {
                     launch(Dispatchers.IO) {
-                        val isReachable = httpClient.checkConnection(dev.ip)
+                        val isReachable = controllerClient.checkConnection(dev.ip)
                         deviceReachabilityMap[dev.id] = isReachable
                         withContext(Dispatchers.Main) {
                             updateDeviceDockDot(dev.id, dev.enabled, isReachable)
