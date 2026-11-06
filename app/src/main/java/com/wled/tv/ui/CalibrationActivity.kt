@@ -19,7 +19,8 @@ import com.wled.tv.data.ConfigRepository
 import com.wled.tv.model.ColorCalibration
 import com.wled.tv.model.WledConfig
 import com.wled.tv.model.WledDevice
-import com.wled.tv.network.WledUdpSender
+import com.wled.tv.network.DefaultWledControllerClient
+import com.wled.tv.network.WledControllerClient
 import com.wled.tv.service.AmbientCaptureService
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -40,7 +41,7 @@ class CalibrationActivity : AppCompatActivity() {
     private val currentCalibration: ColorCalibration
         get() = targetDevice.calibration
 
-    private val udpSender = WledUdpSender()
+    private val controllerClient: WledControllerClient = DefaultWledControllerClient.getInstance()
 
     private lateinit var viewRefBarTop: View
     private lateinit var viewRefBarBottom: View
@@ -98,7 +99,7 @@ class CalibrationActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         stopTestColorStream()
-        udpSender.close()
+
     }
 
     private fun bindViews() {
@@ -274,11 +275,11 @@ class CalibrationActivity : AppCompatActivity() {
                     frame[idx + 2] = b
                 }
 
-                udpSender.sendDeviceFrame(
+                controllerClient.sendFrame(
                     device = dev,
                     rgb = frame,
                     ledCount = leds,
-                    timeoutSeconds = 5
+
                 )
                 delay(100)
             }
