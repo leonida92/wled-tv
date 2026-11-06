@@ -19,11 +19,11 @@ import com.wled.tv.data.ConfigRepository
 import com.wled.tv.model.DeviceType
 import com.wled.tv.model.WledConfig
 import com.wled.tv.model.WledDevice
+import com.wled.tv.network.DefaultWledControllerClient
 import com.wled.tv.network.DeviceReachabilityCache
 import com.wled.tv.network.DiscoveredWled
+import com.wled.tv.network.WledControllerClient
 import com.wled.tv.network.WledDiscovery
-import com.wled.tv.network.WledHttpClient
-import com.wled.tv.network.WledUdpSender
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -41,8 +41,7 @@ class DeviceManagerActivity : AppCompatActivity() {
     private lateinit var btnDiscoverLan: Button
     private lateinit var btnDone: Button
 
-    private val udpSender = WledUdpSender()
-    private val httpClient = WledHttpClient()
+    private val controllerClient: WledControllerClient = DefaultWledControllerClient.getInstance()
     private var testJob: Job? = null
     private var pingPollingJob: Job? = null
     private val deviceReachabilityMap get() = DeviceReachabilityCache.map
@@ -75,7 +74,6 @@ class DeviceManagerActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         testJob?.cancel()
-        udpSender.close()
     }
 
     private fun bindViews() {
@@ -107,7 +105,7 @@ class DeviceManagerActivity : AppCompatActivity() {
             while (isActive) {
                 for (dev in config.devices) {
                     launch(Dispatchers.IO) {
-                        val reachable = httpClient.checkConnection(dev.ip)
+                        val reachable = controllerClient.checkConnection(dev.ip)
                         deviceReachabilityMap[dev.id] = reachable
                         withContext(Dispatchers.Main) {
                             updateDeviceDot(dev.id, dev.enabled, reachable)
@@ -205,24 +203,14 @@ class DeviceManagerActivity : AppCompatActivity() {
 
                     lifecycleScope.launch(Dispatchers.IO) {
                         if (newEnabledState) {
-                            val reachable = httpClient.checkConnection(updatedDevice.ip)
+                            val reachable = controllerClient.checkConnection(updatedDevice.ip)
                             deviceReachabilityMap[updatedDevice.id] = reachable
                             withContext(Dispatchers.Main) {
                                 updateDeviceDot(updatedDevice.id, true, reachable)
                             }
-                            httpClient.wakeAndSetBrightness(updatedDevice.ip, updatedDevice.calibration.maxBrightness)
+                            controllerClient.wakeAndSetBrightness(updatedDevice)
                         } else {
-                            val totalLeds = updatedDevice.totalLeds
-                            if (totalLeds > 0) {
-                                val blackFrame = ByteArray(totalLeds * 3)
-                                udpSender.sendDeviceFrame(
-                                    device = updatedDevice,
-                                    rgb = blackFrame,
-                                    ledCount = totalLeds,
-                                    timeoutSeconds = 2
-                                )
-                            }
-                            httpClient.turnOff(updatedDevice.ip)
+                            controllerClient.turnOff(updatedDevice.ip)
                         }
                     }
                 }
@@ -255,11 +243,7 @@ class DeviceManagerActivity : AppCompatActivity() {
                                 }
                                 renderDeviceList()
                                 lifecycleScope.launch(Dispatchers.IO) {
-                                    val totalLeds = device.totalLeds
-                                    if (totalLeds > 0) {
-                                        udpSender.sendDeviceFrame(device, ByteArray(totalLeds * 3), totalLeds, timeoutSeconds = 2)
-                                    }
-                                    httpClient.turnOff(device.ip)
+                                    controllerClient.turnOff(device.ip)
                                 }
                             }
                         }
@@ -276,22 +260,12 @@ class DeviceManagerActivity : AppCompatActivity() {
         testJob?.cancel()
         Toast.makeText(this, "Identifying ${device.name} (${device.ip})...", Toast.LENGTH_SHORT).show()
 
-        testJob = lifecycleScope.launch(Dispatchers.IO) {
-            val totalLeds = device.totalLeds
-            val whiteFrame = ByteArray(totalLeds * 3) { (255).toByte() }
-            val blackFrame = ByteArray(totalLeds * 3)
-
-            for (flash in 1..3) {
-                if (!isActive) break
-                udpSender.sendDeviceFrame(device, whiteFrame, totalLeds, timeoutSeconds = 2)
-                delay(300)
-                udpSender.sendDeviceFrame(device, blackFrame, totalLeds, timeoutSeconds = 2)
-                delay(300)
-            }
+        testJob = lifecycleScope.launch {
+            controllerClient.flashDevice(device)
             if (device.enabled) {
-                httpClient.wakeAndSetBrightness(device.ip, device.calibration.maxBrightness)
+                controllerClient.wakeAndSetBrightness(device)
             } else {
-                httpClient.turnOff(device.ip)
+                controllerClient.turnOff(device.ip)
             }
         }
     }
