@@ -1,11 +1,10 @@
 package com.wled.tv.service
 
 import com.wled.tv.engine.AmbientStreamingEngine
-import com.wled.tv.model.ThroughputHistoryPoint
-import com.wled.tv.model.ThroughputStats
 import com.wled.tv.model.WledConfig
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -13,68 +12,68 @@ import org.junit.Test
 class AmbientCaptureServiceAdapterTest {
 
     @Test
-    fun companionDelegators_whenEngineNull_handleDefaultsGracefully() {
-        AmbientCaptureService.setActiveEngineForTesting(null)
-
-        assertNull(AmbientCaptureService.activeEngine.value)
-        assertNull(AmbientCaptureService.latestStats)
-        assertFalse(AmbientCaptureService.isDrmActive)
-        assertTrue(AmbientCaptureService.getHistorySnapshot().isEmpty())
-
-        AmbientCaptureService.isTestingOverride = true
-        assertTrue(AmbientCaptureService.isTestingOverride)
-        AmbientCaptureService.isTestingOverride = false
-        assertFalse(AmbientCaptureService.isTestingOverride)
+    fun companionConstants_areDefinedCorrectly() {
+        assertEquals("wled_ambient_capture_channel", AmbientCaptureService.CHANNEL_ID)
+        assertEquals(1001, AmbientCaptureService.NOTIFICATION_ID)
+        assertEquals("com.wled.tv.ACTION_STOP", AmbientCaptureService.ACTION_STOP)
+        assertEquals("com.wled.tv.ACTION_RELOAD_CONFIG", AmbientCaptureService.ACTION_RELOAD_CONFIG)
+        assertEquals("com.wled.tv.ACTION_TOGGLE_OVERLAY", AmbientCaptureService.ACTION_TOGGLE_OVERLAY)
+        assertEquals("com.wled.tv.ACTION_SHOW_OVERLAY", AmbientCaptureService.ACTION_SHOW_OVERLAY)
+        assertEquals("com.wled.tv.ACTION_HIDE_OVERLAY", AmbientCaptureService.ACTION_HIDE_OVERLAY)
+        assertEquals("extra_result_code", AmbientCaptureService.EXTRA_RESULT_CODE)
+        assertEquals("extra_result_data", AmbientCaptureService.EXTRA_RESULT_DATA)
     }
 
     @Test
-    fun companionDelegators_whenEngineActive_forwardToEngine() {
+    fun activeEngineFlow_whenEngineNull_defaultsToNull() {
+        AmbientCaptureService.setActiveEngineForTesting(null)
+        assertNull(AmbientCaptureService.activeEngine.value)
+    }
+
+    @Test
+    fun activeEngineFlow_whenEngineActive_exposesInstanceAndCleanState() {
         val engine = AmbientStreamingEngine(initialConfig = WledConfig())
         try {
             AmbientCaptureService.setActiveEngineForTesting(engine)
             assertEquals(engine, AmbientCaptureService.activeEngine.value)
 
-            // Testing override
-            AmbientCaptureService.isTestingOverride = true
-            assertTrue(engine.isTestingOverride)
-            assertTrue(AmbientCaptureService.isTestingOverride)
-
-            AmbientCaptureService.isTestingOverride = false
+            // State changes are performed directly on the active engine instance
             assertFalse(engine.isTestingOverride)
-            assertFalse(AmbientCaptureService.isTestingOverride)
+            engine.isTestingOverride = true
+            assertTrue(AmbientCaptureService.activeEngine.value?.isTestingOverride == true)
 
-            // History snapshot forwarding
-            val now = System.currentTimeMillis()
-            AmbientCaptureService.recordHistoryPoint(ThroughputHistoryPoint(timestamp = now, fps = 60, pps = 120))
-            val snapshot = AmbientCaptureService.getHistorySnapshot()
-            assertEquals(1, snapshot.size)
-            assertEquals(60, snapshot[0].fps)
+            engine.isTestingOverride = false
+            assertFalse(AmbientCaptureService.activeEngine.value?.isTestingOverride == true)
 
-            AmbientCaptureService.clearHistory()
-            assertTrue(AmbientCaptureService.getHistorySnapshot().isEmpty())
-
-            // Listener forwarding
-            var liveFrameCalled = false
-            AmbientCaptureService.liveFrameListener = AmbientCaptureService.LiveFrameListener { _, _, _ ->
-                liveFrameCalled = true
+            // Listeners are registered directly on the active engine instance
+            var frameProcessed = false
+            engine.liveFrameListener = AmbientStreamingEngine.LiveFrameListener { _, _, _ ->
+                frameProcessed = true
             }
-            engine.liveFrameListener?.onDeviceFrameProcessed("dev1", byteArrayOf(0, 0, 0), 1)
-            assertTrue(liveFrameCalled)
-
-            var throughputCalled = false
-            AmbientCaptureService.throughputListener = AmbientCaptureService.ThroughputListener { _ ->
-                throughputCalled = true
-            }
-            engine.throughputListener?.onThroughputStatsUpdated(
-                ThroughputStats(fps = 60, targetFps = 60, pps = 120, totalPackets = 120L, deviceStats = emptyList())
+            AmbientCaptureService.activeEngine.value?.liveFrameListener?.onDeviceFrameProcessed(
+                "dev1", byteArrayOf(0, 0, 0), 1
             )
-            assertTrue(throughputCalled)
+            assertTrue(frameProcessed)
 
+            // History methods are on the engine directly
+            assertTrue(engine.getHistorySnapshot().isEmpty())
         } finally {
             AmbientCaptureService.setActiveEngineForTesting(null)
-            AmbientCaptureService.liveFrameListener = null
-            AmbientCaptureService.throughputListener = null
-            AmbientCaptureService.isTestingOverride = false
+            assertNull(AmbientCaptureService.activeEngine.value)
         }
+    }
+
+    @Test
+    fun isOverlayShowing_stateFlowTracksOverlayVisibility() {
+        assertNotNull(AmbientCaptureService.isOverlayShowing)
+        assertFalse(AmbientCaptureService.isOverlayShowing.value)
+    }
+
+    @Test
+    fun isRunning_canBeObservedAndToggled() {
+        AmbientCaptureService.isRunning = true
+        assertTrue(AmbientCaptureService.isRunning)
+        AmbientCaptureService.isRunning = false
+        assertFalse(AmbientCaptureService.isRunning)
     }
 }

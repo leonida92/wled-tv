@@ -4,10 +4,10 @@
 
 **Blocked by:** 04: UI Activity & Overlay Migration
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] All static listener variables (`liveFrameListener`, `stateListener`, `throughputListener`), static flags (`isTestingOverride`, `isDrmActive`), and static instance pointers (`currentServiceInstance`) are removed from `AmbientCaptureService.Companion`.
-- [ ] Static history helper methods (`recordHistoryPoint`, `getHistorySnapshot`, `clearHistory`) are removed in favor of engine methods.
-- [ ] The legacy `PreferencesRepository` is removed or replaced by `ConfigRepository`.
-- [ ] Full Android project compiles cleanly (`./gradlew compileDebugKotlin` / `./gradlew assembleDebug`).
-- [ ] All JVM unit test suites (`./gradlew test`) pass with 100% success.
+- [x] All static listener variables (`liveFrameListener`, `stateListener`, `throughputListener`), static flags (`isTestingOverride`, `isDrmActive`), and static instance pointers (`currentServiceInstance`) are removed from `AmbientCaptureService.Companion`.
+- [x] Static history helper methods (`recordHistoryPoint`, `getHistorySnapshot`, `clearHistory`) are removed in favor of engine methods.
+- [x] The legacy `PreferencesRepository` is removed or replaced by `ConfigRepository`.
+- [x] Full Android project compiles cleanly (`./gradlew compileDebugKotlin` / `./gradlew assembleDebug`).
+- [x] All JVM unit test suites (`./gradlew test`) pass with 100% success.

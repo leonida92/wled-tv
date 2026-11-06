@@ -36,9 +36,6 @@ class UiMigrationTest {
     fun tearDown() {
         ConfigRepository.setInstanceForTesting(null)
         AmbientCaptureService.setActiveEngineForTesting(null)
-        AmbientCaptureService.liveFrameListener = null
-        AmbientCaptureService.throughputListener = null
-        AmbientCaptureService.isTestingOverride = false
     }
 
     @Test
@@ -137,16 +134,12 @@ class UiMigrationTest {
         // When starting test pattern
         val active = AmbientCaptureService.activeEngine.value
         active?.isTestingOverride = true
-        AmbientCaptureService.isTestingOverride = true
 
         assertTrue(engine.isTestingOverride)
-        assertTrue(AmbientCaptureService.isTestingOverride)
 
         // When stopping test pattern
         active?.isTestingOverride = false
-        AmbientCaptureService.isTestingOverride = false
 
         assertFalse(engine.isTestingOverride)
-        assertFalse(AmbientCaptureService.isTestingOverride)
     }
 }

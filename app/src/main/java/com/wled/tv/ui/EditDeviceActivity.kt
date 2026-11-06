@@ -845,8 +845,7 @@ class EditDeviceActivity : AppCompatActivity() {
 
         testJob = lifecycleScope.launch(Dispatchers.IO) {
             AmbientCaptureService.activeEngine.value?.isTestingOverride = true
-            AmbientCaptureService.isTestingOverride = true
-            try {
+                try {
                 val totalLeds = currentDevice.totalLeds
             val whiteFrame = ByteArray(totalLeds * 3) { (255).toByte() }
             val blackFrame = ByteArray(totalLeds * 3)
@@ -875,8 +874,7 @@ class EditDeviceActivity : AppCompatActivity() {
             }
             } finally {
                 AmbientCaptureService.activeEngine.value?.isTestingOverride = false
-                AmbientCaptureService.isTestingOverride = false
-            }
+                    }
         }
     }
 

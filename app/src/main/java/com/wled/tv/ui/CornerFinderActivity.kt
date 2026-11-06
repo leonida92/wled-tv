@@ -95,19 +95,16 @@ class CornerFinderActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         AmbientCaptureService.activeEngine.value?.isTestingOverride = true
-        AmbientCaptureService.isTestingOverride = true
     }
 
     override fun onPause() {
         super.onPause()
         AmbientCaptureService.activeEngine.value?.isTestingOverride = false
-        AmbientCaptureService.isTestingOverride = false
     }
 
     override fun onDestroy() {
         super.onDestroy()
         AmbientCaptureService.activeEngine.value?.isTestingOverride = false
-        AmbientCaptureService.isTestingOverride = false
         turnOffLeds()
         udpSender.close()
     }

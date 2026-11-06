@@ -37,12 +37,9 @@ import androidx.core.app.NotificationCompat
 import com.wled.tv.R
 import com.wled.tv.data.ConfigRepository
 import com.wled.tv.engine.AmbientStreamingEngine
-import com.wled.tv.model.ThroughputHistoryPoint
-import com.wled.tv.model.ThroughputStats
 import com.wled.tv.model.WledConfig
 import com.wled.tv.network.WledHttpClient
 import com.wled.tv.ui.MainActivity
-import com.wled.tv.ui.views.DeviceOverlayData
 import com.wled.tv.ui.views.SamplingOverlayView
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -186,7 +183,6 @@ class AmbientCaptureService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        currentServiceInstance = this
         configRepo = ConfigRepository.getInstance(applicationContext)
         config = configRepo.currentConfig
         createNotificationChannel()
@@ -282,6 +278,18 @@ class AmbientCaptureService : Service() {
                 reloadConfig()
                 return START_STICKY
             }
+            ACTION_TOGGLE_OVERLAY -> {
+                toggleSamplingOverlay()
+                return START_STICKY
+            }
+            ACTION_SHOW_OVERLAY -> {
+                showSamplingOverlay()
+                return START_STICKY
+            }
+            ACTION_HIDE_OVERLAY -> {
+                hideSamplingOverlay()
+                return START_STICKY
+            }
         }
 
         val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, 0) ?: 0
@@ -349,15 +357,11 @@ class AmbientCaptureService : Service() {
 
         isCapturing.set(true)
         isRunning = true
-        stateListener?.onStateChanged(true)
 
         val newEngine = AmbientStreamingEngine(
             initialConfig = config,
             isAudioActive = { audioManager?.isMusicActive == true }
         ).apply {
-            isTestingOverride = _isTestingOverride
-            liveFrameListener = AmbientCaptureService.liveFrameListener
-            throughputListener = AmbientCaptureService.throughputListener
             colorProcessor.isOverlayActive = isOverlayVisible
         }
         engine = newEngine
@@ -584,6 +588,7 @@ class AmbientCaptureService : Service() {
                 wm.addView(view, params)
                 overlayView = view
                 isOverlayVisible = true
+                _isOverlayShowing.value = true
                 engine?.colorProcessor?.isOverlayActive = true
                 Log.i(TAG, "Sampling overlay attached to WindowManager")
                 backgroundHandler?.post {
@@ -609,6 +614,7 @@ class AmbientCaptureService : Service() {
             } finally {
                 overlayView = null
                 isOverlayVisible = false
+                _isOverlayShowing.value = false
                 engine?.colorProcessor?.isOverlayActive = false
                 backgroundHandler?.post {
                     systemStatsCollector.reset()
@@ -642,9 +648,9 @@ class AmbientCaptureService : Service() {
 
         hideSamplingOverlay()
         isRunning = false
+        _isOverlayShowing.value = false
         latestSystemStatsString = ""
         systemStatsCollector.reset()
-        stateListener?.onStateChanged(false)
 
         try {
             backgroundHandler?.removeCallbacksAndMessages(null)
@@ -796,25 +802,10 @@ class AmbientCaptureService : Service() {
         try {
             serviceScope.cancel()
         } catch (_: Exception) {}
-        if (currentServiceInstance == this) {
-            currentServiceInstance = null
-        }
         super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
-
-    fun interface LiveFrameListener : AmbientStreamingEngine.LiveFrameListener {
-        override fun onDeviceFrameProcessed(deviceId: String, rgb: ByteArray, count: Int)
-    }
-
-    fun interface ServiceStateListener {
-        fun onStateChanged(running: Boolean)
-    }
-
-    fun interface ThroughputListener : AmbientStreamingEngine.ThroughputListener {
-        override fun onThroughputStatsUpdated(stats: ThroughputStats)
-    }
 
     companion object {
         private const val TAG = "AmbientCaptureService"
@@ -823,6 +814,9 @@ class AmbientCaptureService : Service() {
 
         const val ACTION_STOP = "com.wled.tv.ACTION_STOP"
         const val ACTION_RELOAD_CONFIG = "com.wled.tv.ACTION_RELOAD_CONFIG"
+        const val ACTION_TOGGLE_OVERLAY = "com.wled.tv.ACTION_TOGGLE_OVERLAY"
+        const val ACTION_SHOW_OVERLAY = "com.wled.tv.ACTION_SHOW_OVERLAY"
+        const val ACTION_HIDE_OVERLAY = "com.wled.tv.ACTION_HIDE_OVERLAY"
         const val EXTRA_RESULT_CODE = "extra_result_code"
         const val EXTRA_RESULT_DATA = "extra_result_data"
 
@@ -832,55 +826,12 @@ class AmbientCaptureService : Service() {
         private val _activeEngine = MutableStateFlow<AmbientStreamingEngine?>(null)
         val activeEngine: StateFlow<AmbientStreamingEngine?> = _activeEngine.asStateFlow()
 
+        private val _isOverlayShowing = MutableStateFlow(false)
+        val isOverlayShowing: StateFlow<Boolean> = _isOverlayShowing.asStateFlow()
+
         @androidx.annotation.VisibleForTesting
         internal fun setActiveEngineForTesting(engine: AmbientStreamingEngine?) {
             _activeEngine.value = engine
-        }
-
-        @Volatile
-        private var _isTestingOverride: Boolean = false
-
-        var isTestingOverride: Boolean
-            get() = _activeEngine.value?.isTestingOverride ?: _isTestingOverride
-            set(value) {
-                _isTestingOverride = value
-                _activeEngine.value?.isTestingOverride = value
-            }
-
-        var isDrmActive: Boolean
-            get() = _activeEngine.value?.isDrmActive ?: false
-            set(_) {}
-
-        var latestStats: ThroughputStats?
-            get() = _activeEngine.value?.latestStats
-            set(_) {}
-
-        var currentServiceInstance: AmbientCaptureService? = null
-
-        var liveFrameListener: LiveFrameListener? = null
-            set(value) {
-                field = value
-                _activeEngine.value?.liveFrameListener = value
-            }
-
-        var stateListener: ServiceStateListener? = null
-
-        var throughputListener: ThroughputListener? = null
-            set(value) {
-                field = value
-                _activeEngine.value?.throughputListener = value
-            }
-
-        fun recordHistoryPoint(point: ThroughputHistoryPoint) {
-            _activeEngine.value?.recordHistoryPoint(point)
-        }
-
-        fun getHistorySnapshot(windowSeconds: Int = 10800): List<ThroughputHistoryPoint> {
-            return _activeEngine.value?.getHistorySnapshot(windowSeconds) ?: emptyList()
-        }
-
-        fun clearHistory() {
-            _activeEngine.value?.clearHistory()
         }
     }
 }

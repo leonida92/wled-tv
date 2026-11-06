@@ -243,7 +243,6 @@ class CalibrationActivity : AppCompatActivity() {
     private fun startTestColorStream() {
         testColorJob?.cancel()
         AmbientCaptureService.activeEngine.value?.isTestingOverride = true
-        AmbientCaptureService.isTestingOverride = true
 
         testColorJob = lifecycleScope.launch(Dispatchers.IO) {
             while (isActive && activeTestColor != null) {
@@ -281,7 +280,6 @@ class CalibrationActivity : AppCompatActivity() {
         testColorJob?.cancel()
         testColorJob = null
         AmbientCaptureService.activeEngine.value?.isTestingOverride = false
-        AmbientCaptureService.isTestingOverride = false
     }
 
     private fun setupSliderItem(view: View, step: Float, onAdjust: (Float) -> Unit) {
