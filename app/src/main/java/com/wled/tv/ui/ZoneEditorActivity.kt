@@ -8,7 +8,7 @@ import android.widget.Button
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import com.wled.tv.R
-import com.wled.tv.data.PreferencesRepository
+import com.wled.tv.data.ConfigRepository
 import com.wled.tv.model.AspectRatioPreset
 import com.wled.tv.model.WledConfig
 import com.wled.tv.service.AmbientCaptureService
@@ -18,7 +18,7 @@ import java.util.Locale
 
 class ZoneEditorActivity : AppCompatActivity() {
 
-    private lateinit var prefsRepo: PreferencesRepository
+    private lateinit var configRepo: ConfigRepository
     private var config: WledConfig = WledConfig()
 
     private lateinit var zoneCanvas: ZoneCanvasView
@@ -39,8 +39,8 @@ class ZoneEditorActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_zone_editor)
 
-        prefsRepo = PreferencesRepository(this)
-        config = prefsRepo.loadConfig()
+        configRepo = ConfigRepository.getInstance(this)
+        config = configRepo.currentConfig
 
         bindViews()
         setupListeners()
@@ -225,11 +225,8 @@ class ZoneEditorActivity : AppCompatActivity() {
     }
 
     private fun saveAndUpdate() {
-        prefsRepo.saveConfig(config)
+        configRepo.updateConfigBlocking { config }
         updateUi()
-        if (AmbientCaptureService.isRunning) {
-            AmbientCaptureService.currentServiceInstance?.reloadConfig()
-        }
     }
 
     private fun updateUi() {

@@ -15,7 +15,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.wled.tv.R
-import com.wled.tv.data.PreferencesRepository
+import com.wled.tv.data.ConfigRepository
 import com.wled.tv.model.DeviceType
 import com.wled.tv.model.WledConfig
 import com.wled.tv.model.WledDevice
@@ -34,7 +34,7 @@ import kotlinx.coroutines.withContext
 
 class DeviceManagerActivity : AppCompatActivity() {
 
-    private lateinit var prefsRepo: PreferencesRepository
+    private lateinit var configRepo: ConfigRepository
     private var config: WledConfig = WledConfig()
 
     private lateinit var layoutDeviceList: LinearLayout
@@ -52,8 +52,8 @@ class DeviceManagerActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_device_manager)
 
-        prefsRepo = PreferencesRepository(this)
-        config = prefsRepo.loadConfig()
+        configRepo = ConfigRepository.getInstance(this)
+        config = configRepo.currentConfig
 
         bindViews()
         setupListeners()
@@ -62,7 +62,7 @@ class DeviceManagerActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        config = prefsRepo.loadConfig()
+        config = configRepo.currentConfig
         renderDeviceList()
         startPingPolling()
     }
@@ -341,9 +341,6 @@ class DeviceManagerActivity : AppCompatActivity() {
     }
 
     private fun saveAndUpdate() {
-        prefsRepo.saveConfig(config)
-        if (AmbientCaptureService.isRunning) {
-            AmbientCaptureService.currentServiceInstance?.reloadConfig()
-        }
+        configRepo.updateConfigBlocking { config }
     }
 }

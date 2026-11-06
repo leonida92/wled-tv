@@ -8,7 +8,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import com.wled.tv.R
-import com.wled.tv.data.PreferencesRepository
+import com.wled.tv.data.ConfigRepository
 import com.wled.tv.model.Corner
 import com.wled.tv.model.Direction
 import com.wled.tv.model.PerimeterConfig
@@ -18,7 +18,7 @@ import com.wled.tv.service.AmbientCaptureService
 
 class SettingsActivity : AppCompatActivity() {
 
-    private lateinit var prefsRepo: PreferencesRepository
+    private lateinit var configRepo: ConfigRepository
     private var config: WledConfig = WledConfig()
     private var targetDeviceId: String? = null
 
@@ -51,8 +51,8 @@ class SettingsActivity : AppCompatActivity() {
         setContentView(R.layout.activity_settings)
 
         targetDeviceId = intent.getStringExtra(EXTRA_DEVICE_ID)
-        prefsRepo = PreferencesRepository(this)
-        config = prefsRepo.loadConfig()
+        configRepo = ConfigRepository.getInstance(this)
+        config = configRepo.currentConfig
 
         bindViews()
         setupListeners()
@@ -61,7 +61,7 @@ class SettingsActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        config = prefsRepo.loadConfig()
+        config = configRepo.currentConfig
         updateUiValues()
     }
 
@@ -183,11 +183,8 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun saveAndUpdate() {
-        prefsRepo.saveConfig(config)
+        configRepo.updateConfigBlocking { config }
         updateUiValues()
-        if (AmbientCaptureService.isRunning) {
-            AmbientCaptureService.currentServiceInstance?.reloadConfig()
-        }
     }
 
     private fun updateUiValues() {

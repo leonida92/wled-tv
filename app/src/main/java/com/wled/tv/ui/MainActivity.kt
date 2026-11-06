@@ -22,7 +22,10 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.wled.tv.R
-import com.wled.tv.data.PreferencesRepository
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
+import com.wled.tv.data.ConfigRepository
+import com.wled.tv.engine.AmbientStreamingEngine
 import com.wled.tv.model.DeviceThroughputStats
 import com.wled.tv.model.DeviceType
 import com.wled.tv.model.ThroughputStats
@@ -48,7 +51,8 @@ class MainActivity : AppCompatActivity(),
     AmbientCaptureService.ServiceStateListener,
     AmbientCaptureService.ThroughputListener {
 
-    private lateinit var prefsRepo: PreferencesRepository
+    private lateinit var configRepo: ConfigRepository
+    private var activeEngine: AmbientStreamingEngine? = null
     private var config: WledConfig = WledConfig()
 
     private val httpClient = WledHttpClient()
@@ -94,17 +98,53 @@ class MainActivity : AppCompatActivity(),
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        prefsRepo = PreferencesRepository(this)
-        config = prefsRepo.loadConfig()
+        configRepo = ConfigRepository.getInstance(this)
+        config = configRepo.currentConfig
 
         bindViews()
         setupListeners()
         renderDeviceDock()
         updateUiState()
+        setupObservers()
 
         if (intent.getBooleanExtra("EXTRA_AUTO_START_TRIGGERED", false) && !AmbientCaptureService.isRunning) {
             intent.removeExtra("EXTRA_AUTO_START_TRIGGERED")
             requestScreenCapture()
+        }
+    }
+
+    private fun setupObservers() {
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                launch {
+                    configRepo.configFlow.collect { newConfig ->
+                        config = newConfig
+                        renderDeviceDock()
+                        tvPreviewView.updateDevices(newConfig.devices)
+                        updateUiState()
+                    }
+                }
+                launch {
+                    AmbientCaptureService.activeEngine.collect { engine ->
+                        activeEngine?.liveFrameListener = null
+                        activeEngine?.throughputListener = null
+                        activeEngine = engine
+
+                        if (engine != null) {
+                            tvPreviewView.setLiveActive(true)
+                            engine.liveFrameListener = this@MainActivity
+                            engine.throughputListener = this@MainActivity
+                            btnThroughputPill.visibility = View.VISIBLE
+                            engine.latestStats?.let { updateThroughputUi(it) }
+                        } else {
+                            tvPreviewView.setLiveActive(false)
+                            tvPreviewView.clearLiveColors()
+                            btnThroughputPill.visibility = View.GONE
+                        }
+                        updateUiState()
+                    }
+                }
+            }
         }
     }
 
@@ -119,18 +159,23 @@ class MainActivity : AppCompatActivity(),
 
     override fun onResume() {
         super.onResume()
-        config = prefsRepo.loadConfig()
+        config = configRepo.currentConfig
         renderDeviceDock()
         tvPreviewView.updateDevices(config.devices)
-        if (AmbientCaptureService.isRunning) {
+        val currentEngine = activeEngine ?: AmbientCaptureService.activeEngine.value
+        if (currentEngine != null || AmbientCaptureService.isRunning) {
             tvPreviewView.setLiveActive(true)
+            currentEngine?.liveFrameListener = this
+            currentEngine?.throughputListener = this
             AmbientCaptureService.liveFrameListener = this
             AmbientCaptureService.throughputListener = this
             btnThroughputPill.visibility = View.VISIBLE
-            AmbientCaptureService.latestStats?.let { updateThroughputUi(it) }
+            (currentEngine?.latestStats ?: AmbientCaptureService.latestStats)?.let { updateThroughputUi(it) }
         } else {
             tvPreviewView.setLiveActive(false)
             tvPreviewView.clearLiveColors()
+            currentEngine?.liveFrameListener = null
+            currentEngine?.throughputListener = null
             AmbientCaptureService.liveFrameListener = null
             AmbientCaptureService.throughputListener = null
             btnThroughputPill.visibility = View.GONE
@@ -145,6 +190,8 @@ class MainActivity : AppCompatActivity(),
         throughputDialog?.dismiss()
         throughputDialog = null
         currentDialogView = null
+        activeEngine?.liveFrameListener = null
+        activeEngine?.throughputListener = null
         AmbientCaptureService.liveFrameListener = null
         AmbientCaptureService.throughputListener = null
         AmbientCaptureService.stateListener = null
@@ -288,21 +335,20 @@ class MainActivity : AppCompatActivity(),
         }
     }
 
-    private fun toggleDeviceEnabled(device: WledDevice, position: Int) {
+    private fun toggleDeviceEnabled(device: WledDevice, @Suppress("UNUSED_PARAMETER") position: Int) {
         val newEnabled = !device.enabled
-        val updatedList = config.devices.toMutableList()
         val updatedDevice = device.copy(enabled = newEnabled)
-        updatedList[position] = updatedDevice
-        config = config.copy(devices = updatedList)
-        prefsRepo.saveConfig(config)
 
-        if (AmbientCaptureService.isRunning) {
-            AmbientCaptureService.currentServiceInstance?.reloadConfig()
+        lifecycleScope.launch {
+            configRepo.updateConfig { cur ->
+                val list = cur.devices.toMutableList()
+                val idx = list.indexOfFirst { it.id == device.id }
+                if (idx != -1) {
+                    list[idx] = updatedDevice
+                }
+                cur.copy(devices = list)
+            }
         }
-
-        renderDeviceDock()
-        tvPreviewView.updateDevices(config.devices)
-        updateUiState()
 
         lifecycleScope.launch(Dispatchers.IO) {
             if (newEnabled) {
@@ -405,6 +451,7 @@ class MainActivity : AppCompatActivity(),
     private fun startTestPattern() {
         isTesting = true
         testPatternJob?.cancel()
+        activeEngine?.isTestingOverride = true
         AmbientCaptureService.isTestingOverride = true
         tvPreviewView.setLiveActive(true)
 
@@ -451,8 +498,10 @@ class MainActivity : AppCompatActivity(),
         isTesting = false
         testPatternJob?.cancel()
         testPatternJob = null
+        activeEngine?.isTestingOverride = false
         AmbientCaptureService.isTestingOverride = false
-        if (AmbientCaptureService.isRunning) {
+        val isRunning = activeEngine != null || AmbientCaptureService.isRunning
+        if (isRunning) {
             tvPreviewView.setLiveActive(true)
         } else {
             tvPreviewView.setLiveActive(false)
@@ -483,6 +532,8 @@ class MainActivity : AppCompatActivity(),
 
     private fun startAmbientService(resultCode: Int, data: Intent) {
         tvPreviewView.setLiveActive(true)
+        activeEngine?.liveFrameListener = this
+        activeEngine?.throughputListener = this
         AmbientCaptureService.liveFrameListener = this
         AmbientCaptureService.throughputListener = this
         btnThroughputPill.visibility = View.VISIBLE
@@ -497,6 +548,8 @@ class MainActivity : AppCompatActivity(),
 
     private fun stopAmbientService() {
         AmbientCaptureService.isRunning = false
+        activeEngine?.liveFrameListener = null
+        activeEngine?.throughputListener = null
         AmbientCaptureService.liveFrameListener = null
         AmbientCaptureService.throughputListener = null
         btnThroughputPill.visibility = View.GONE
@@ -510,7 +563,7 @@ class MainActivity : AppCompatActivity(),
     }
 
     private fun updateUiState() {
-        val running = AmbientCaptureService.isRunning
+        val running = activeEngine != null || AmbientCaptureService.isRunning
         val pingableActiveCount = config.enabledDevices.count { dev ->
             deviceReachabilityMap[dev.id] == true
         }
@@ -524,7 +577,8 @@ class MainActivity : AppCompatActivity(),
             tvPowerText.setTextColor(Color.parseColor("#F87171"))
             ivPowerIcon.imageTintList = ColorStateList.valueOf(Color.parseColor("#EF4444"))
 
-            if (AmbientCaptureService.isDrmActive) {
+            val isDrm = activeEngine?.isDrmActive ?: AmbientCaptureService.isDrmActive
+            if (isDrm) {
                 viewStatusDot.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#F59E0B"))
                 tvStatusTitle.text = "Widevine L1 DRM Active"
             } else if (pingableActiveCount > 0) {
@@ -581,9 +635,11 @@ class MainActivity : AppCompatActivity(),
     }
 
     override fun onDeviceFrameProcessed(deviceId: String, rgb: ByteArray, count: Int) {
-        if (!isTesting && AmbientCaptureService.isRunning && tvPreviewView.isLiveActive) {
+        val isRunning = activeEngine != null || AmbientCaptureService.isRunning
+        if (!isTesting && isRunning && tvPreviewView.isLiveActive) {
             runOnUiThread {
-                if (AmbientCaptureService.isRunning && tvPreviewView.isLiveActive) {
+                val currentlyRunning = activeEngine != null || AmbientCaptureService.isRunning
+                if (currentlyRunning && tvPreviewView.isLiveActive) {
                     tvPreviewView.updateDeviceLiveColors(deviceId, rgb, count)
                 }
             }
@@ -608,7 +664,7 @@ class MainActivity : AppCompatActivity(),
 
     override fun onThroughputStatsUpdated(stats: ThroughputStats) {
         runOnUiThread {
-            if (AmbientCaptureService.isRunning) {
+            if (activeEngine != null || AmbientCaptureService.isRunning) {
                 updateThroughputUi(stats)
                 updateUiState()
                 val dialogView = currentDialogView
@@ -628,7 +684,8 @@ class MainActivity : AppCompatActivity(),
 
     private fun refreshDialogTelemetry(dialogView: View, stats: ThroughputStats, windowSec: Int) {
         val cardDrmNotice = dialogView.findViewById<View>(R.id.cardDrmNotice)
-        cardDrmNotice?.visibility = if (AmbientCaptureService.isDrmActive) View.VISIBLE else View.GONE
+        val isDrm = activeEngine?.isDrmActive ?: AmbientCaptureService.isDrmActive
+        cardDrmNotice?.visibility = if (isDrm) View.VISIBLE else View.GONE
 
         val tvFpsValue = dialogView.findViewById<TextView>(R.id.tvDiagFpsValue)
         val tvDiagFpsTarget = dialogView.findViewById<TextView>(R.id.tvDiagFpsTarget)
@@ -657,7 +714,7 @@ class MainActivity : AppCompatActivity(),
         tvPpsValue.text = "${stats.pps} pkts/s"
         tvTotalPackets.text = String.format(Locale.US, "%,d packets sent this session", stats.totalPackets)
 
-        val history = AmbientCaptureService.getHistorySnapshot(windowSec)
+        val history = activeEngine?.getHistorySnapshot(windowSec) ?: AmbientCaptureService.getHistorySnapshot(windowSec)
         chart.setData(history, windowSec, config.calibration.fps, config.enabledDevices.size)
 
         val summary = chart.getSummaryStats()
@@ -713,7 +770,7 @@ class MainActivity : AppCompatActivity(),
     }
 
     private fun showThroughputDetailsDialog() {
-        val stats = AmbientCaptureService.latestStats ?: ThroughputStats(
+        val stats = activeEngine?.latestStats ?: AmbientCaptureService.latestStats ?: ThroughputStats(
             fps = 0,
             targetFps = config.calibration.fps,
             pps = 0,
@@ -740,27 +797,27 @@ class MainActivity : AppCompatActivity(),
 
         btnWindow5m.setOnClickListener {
             selectedWindowSeconds = 300
-            val cur = AmbientCaptureService.latestStats ?: stats
+            val cur = activeEngine?.latestStats ?: AmbientCaptureService.latestStats ?: stats
             refreshDialogTelemetry(dialogView, cur, 300)
         }
         btnWindow15m.setOnClickListener {
             selectedWindowSeconds = 900
-            val cur = AmbientCaptureService.latestStats ?: stats
+            val cur = activeEngine?.latestStats ?: AmbientCaptureService.latestStats ?: stats
             refreshDialogTelemetry(dialogView, cur, 900)
         }
         btnWindow30m.setOnClickListener {
             selectedWindowSeconds = 1800
-            val cur = AmbientCaptureService.latestStats ?: stats
+            val cur = activeEngine?.latestStats ?: AmbientCaptureService.latestStats ?: stats
             refreshDialogTelemetry(dialogView, cur, 1800)
         }
         btnWindow1h.setOnClickListener {
             selectedWindowSeconds = 3600
-            val cur = AmbientCaptureService.latestStats ?: stats
+            val cur = activeEngine?.latestStats ?: AmbientCaptureService.latestStats ?: stats
             refreshDialogTelemetry(dialogView, cur, 3600)
         }
         btnWindow3h.setOnClickListener {
             selectedWindowSeconds = 10800
-            val cur = AmbientCaptureService.latestStats ?: stats
+            val cur = activeEngine?.latestStats ?: AmbientCaptureService.latestStats ?: stats
             refreshDialogTelemetry(dialogView, cur, 10800)
         }
 

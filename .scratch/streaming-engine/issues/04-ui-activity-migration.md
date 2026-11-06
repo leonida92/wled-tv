@@ -4,10 +4,10 @@
 
 **Blocked by:** 03: Slim AmbientCaptureService Adapter
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `MainActivity` observes `ConfigRepository.configFlow` to render device docks and status indicators.
-- [ ] `MainActivity` collects `activeEngine` lifecycle-safely to attach live frame preview listeners and update throughput dialogs.
-- [ ] `SamplingOverlayView` observes `activeEngine` for real-time sampling crops and telemetry text.
-- [ ] Diagnostic test patterns in `MainActivity`, `CalibrationActivity`, and `CornerFinderActivity` pause ambient capture via `engine.isTestingOverride = true` rather than a global static variable.
-- [ ] `EditDeviceActivity`, `DeviceManagerActivity`, `CalibrationActivity`, `ZoneEditorActivity`, `CornerFinderActivity`, `SystemSettingsActivity`, and `SettingsActivity` apply mutations through `ConfigRepository.updateConfig(...)`, removing all calls to `currentServiceInstance?.reloadConfig()`.
+- [x] `MainActivity` observes `ConfigRepository.configFlow` to render device docks and status indicators.
+- [x] `MainActivity` collects `activeEngine` lifecycle-safely to attach live frame preview listeners and update throughput dialogs.
+- [x] `SamplingOverlayView` observes `activeEngine` for real-time sampling crops and telemetry text.
+- [x] Diagnostic test patterns in `MainActivity`, `CalibrationActivity`, and `CornerFinderActivity` pause ambient capture via `engine.isTestingOverride = true` rather than a global static variable.
+- [x] `EditDeviceActivity`, `DeviceManagerActivity`, `CalibrationActivity`, `ZoneEditorActivity`, `CornerFinderActivity`, `SystemSettingsActivity`, and `SettingsActivity` apply mutations through `ConfigRepository.updateConfig(...)`, removing all calls to `currentServiceInstance?.reloadConfig()`.

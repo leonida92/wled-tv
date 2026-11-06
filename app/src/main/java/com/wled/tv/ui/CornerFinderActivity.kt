@@ -11,7 +11,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.wled.tv.R
-import com.wled.tv.data.PreferencesRepository
+import com.wled.tv.data.ConfigRepository
 import com.wled.tv.model.CalculatedPerimeter
 import com.wled.tv.model.PerimeterCalculator
 import com.wled.tv.model.WledConfig
@@ -23,7 +23,7 @@ import kotlinx.coroutines.launch
 
 class CornerFinderActivity : AppCompatActivity() {
 
-    private lateinit var prefsRepo: PreferencesRepository
+    private lateinit var configRepo: ConfigRepository
     private var config: WledConfig = WledConfig()
     private var targetDeviceId: String? = null
     private lateinit var targetDevice: WledDevice
@@ -74,8 +74,8 @@ class CornerFinderActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_corner_finder)
 
-        prefsRepo = PreferencesRepository(this)
-        config = prefsRepo.loadConfig()
+        configRepo = ConfigRepository.getInstance(this)
+        config = configRepo.currentConfig
         targetDeviceId = intent.getStringExtra(EXTRA_DEVICE_ID)
 
         targetDevice = if (targetDeviceId != null) {
@@ -94,18 +94,20 @@ class CornerFinderActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        AmbientCaptureService.activeEngine.value?.isTestingOverride = true
         AmbientCaptureService.isTestingOverride = true
     }
 
     override fun onPause() {
         super.onPause()
+        AmbientCaptureService.activeEngine.value?.isTestingOverride = false
         AmbientCaptureService.isTestingOverride = false
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        AmbientCaptureService.activeEngine.value?.isTestingOverride = false
         AmbientCaptureService.isTestingOverride = false
-        super.onDestroy()
         turnOffLeds()
         udpSender.close()
     }
@@ -374,12 +376,10 @@ class CornerFinderActivity : AppCompatActivity() {
             type = com.wled.tv.model.DeviceType.PERIMETER,
             perimeter = updatedPerimeter
         )
-        val updatedConfig = config.updateDevice(updatedDevice)
-        prefsRepo.saveConfig(updatedConfig)
-
-        if (AmbientCaptureService.isRunning) {
-            AmbientCaptureService.currentServiceInstance?.reloadConfig()
+        val updatedConfig = configRepo.updateConfigBlocking { cur ->
+            cur.updateDevice(updatedDevice)
         }
+        config = updatedConfig
 
         turnOffLeds()
         Toast.makeText(this, "Corner calibration saved successfully!", Toast.LENGTH_SHORT).show()

@@ -15,7 +15,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import com.wled.tv.R
-import com.wled.tv.data.PreferencesRepository
+import com.wled.tv.data.ConfigRepository
 import com.wled.tv.model.ColorCalibration
 import com.wled.tv.model.WledConfig
 import com.wled.tv.model.WledDevice
@@ -26,7 +26,7 @@ import kotlin.math.roundToInt
 
 class CalibrationActivity : AppCompatActivity() {
 
-    private lateinit var prefsRepo: PreferencesRepository
+    private lateinit var configRepo: ConfigRepository
     private var config: WledConfig = WledConfig()
     private var targetDeviceId: String? = null
 
@@ -87,8 +87,8 @@ class CalibrationActivity : AppCompatActivity() {
         setContentView(R.layout.activity_calibration)
 
         targetDeviceId = intent.getStringExtra(EXTRA_DEVICE_ID)
-        prefsRepo = PreferencesRepository(this)
-        config = prefsRepo.loadConfig()
+        configRepo = ConfigRepository.getInstance(this)
+        config = configRepo.currentConfig
 
         bindViews()
         setupListeners()
@@ -242,6 +242,7 @@ class CalibrationActivity : AppCompatActivity() {
 
     private fun startTestColorStream() {
         testColorJob?.cancel()
+        AmbientCaptureService.activeEngine.value?.isTestingOverride = true
         AmbientCaptureService.isTestingOverride = true
 
         testColorJob = lifecycleScope.launch(Dispatchers.IO) {
@@ -279,6 +280,7 @@ class CalibrationActivity : AppCompatActivity() {
     private fun stopTestColorStream() {
         testColorJob?.cancel()
         testColorJob = null
+        AmbientCaptureService.activeEngine.value?.isTestingOverride = false
         AmbientCaptureService.isTestingOverride = false
     }
 
@@ -311,11 +313,11 @@ class CalibrationActivity : AppCompatActivity() {
     }
 
     private fun saveAndUpdate() {
-        prefsRepo.saveConfig(config)
-        updateUiValues()
-        if (AmbientCaptureService.isRunning) {
-            AmbientCaptureService.currentServiceInstance?.reloadConfig()
+        configRepo.updateConfigBlocking { cur ->
+            cur.updateDevice(targetDevice)
         }
+        config = configRepo.currentConfig
+        updateUiValues()
     }
 
     private fun updateUiValues() {

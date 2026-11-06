@@ -17,7 +17,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.wled.tv.R
-import com.wled.tv.data.PreferencesRepository
+import com.wled.tv.data.ConfigRepository
 import com.wled.tv.model.Corner
 import com.wled.tv.model.DeviceType
 import com.wled.tv.model.Direction
@@ -39,7 +39,7 @@ import java.util.UUID
 
 class EditDeviceActivity : AppCompatActivity() {
 
-    private lateinit var prefsRepo: PreferencesRepository
+    private lateinit var configRepo: ConfigRepository
     private var config: WledConfig = WledConfig()
     private var deviceId: String? = null
     private lateinit var currentDevice: WledDevice
@@ -79,8 +79,8 @@ class EditDeviceActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_edit_device)
 
-        prefsRepo = PreferencesRepository(this)
-        config = prefsRepo.loadConfig()
+        configRepo = ConfigRepository.getInstance(this)
+        config = configRepo.currentConfig
 
         deviceId = intent.getStringExtra(EXTRA_DEVICE_ID)
         val initialTypeStr = intent.getStringExtra(EXTRA_DEVICE_TYPE)
@@ -129,7 +129,7 @@ class EditDeviceActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        config = prefsRepo.loadConfig()
+        config = configRepo.currentConfig
         val reloaded = config.devices.firstOrNull { it.id == currentDevice.id }
         if (reloaded != null) {
             currentDevice = reloaded
@@ -143,9 +143,8 @@ class EditDeviceActivity : AppCompatActivity() {
         udpSender.close()
         if (isNewDevice && !isSaved) {
             // Clean up any temporary draft saved for sub-activities
-            val latest = prefsRepo.loadConfig()
-            if (latest.devices.any { it.id == currentDevice.id }) {
-                prefsRepo.saveConfig(latest.copy(devices = latest.devices.filter { it.id != currentDevice.id }))
+            configRepo.updateConfigBlocking { cur ->
+                cur.copy(devices = cur.devices.filter { it.id != currentDevice.id })
             }
         }
     }
@@ -761,17 +760,17 @@ class EditDeviceActivity : AppCompatActivity() {
         currentDevice = currentDevice.copy(name = name, ip = ip, port = port)
 
         // Save temporary draft in config so child settings activity can inspect/modify it
-        config = prefsRepo.loadConfig()
-        val updated = if (config.devices.any { it.id == currentDevice.id }) {
-            config.updateDevice(currentDevice)
-        } else {
-            config.copy(devices = config.devices + currentDevice)
+        config = configRepo.updateConfigBlocking { cur ->
+            if (cur.devices.any { it.id == currentDevice.id }) {
+                cur.updateDevice(currentDevice)
+            } else {
+                cur.copy(devices = cur.devices + currentDevice)
+            }
         }
-        prefsRepo.saveConfig(updated)
     }
 
     private fun confirmDeleteDevice() {
-        config = prefsRepo.loadConfig()
+        config = configRepo.currentConfig
         if (config.devices.size <= 1) {
             AlertDialog.Builder(this)
                 .setTitle("Cannot Delete")
@@ -786,9 +785,9 @@ class EditDeviceActivity : AppCompatActivity() {
             .setMessage("Are you sure you want to delete '${currentDevice.name}'?")
             .setPositiveButton("Delete") { _, _ ->
                 val deviceToDelete = currentDevice
-                val updatedDevices = config.devices.filter { it.id != deviceToDelete.id }
-                config = config.copy(devices = updatedDevices)
-                prefsRepo.saveConfig(config)
+                config = configRepo.updateConfigBlocking { cur ->
+                    cur.copy(devices = cur.devices.filter { it.id != deviceToDelete.id })
+                }
                 isSaved = true
 
                 CoroutineScope(Dispatchers.IO).launch {
@@ -809,10 +808,6 @@ class EditDeviceActivity : AppCompatActivity() {
                     }
                 }
 
-                if (AmbientCaptureService.isRunning) {
-                    AmbientCaptureService.currentServiceInstance?.reloadConfig()
-                }
-
                 Toast.makeText(this, "Deleted ${deviceToDelete.name}", Toast.LENGTH_SHORT).show()
                 finish()
             }
@@ -830,19 +825,14 @@ class EditDeviceActivity : AppCompatActivity() {
         }
 
         currentDevice = currentDevice.copy(name = name, ip = ip, port = port)
-        config = prefsRepo.loadConfig()
-
-        val finalConfig = if (config.devices.any { it.id == currentDevice.id }) {
-            config.updateDevice(currentDevice)
-        } else {
-            config.copy(devices = config.devices + currentDevice)
+        config = configRepo.updateConfigBlocking { cur ->
+            if (cur.devices.any { it.id == currentDevice.id }) {
+                cur.updateDevice(currentDevice)
+            } else {
+                cur.copy(devices = cur.devices + currentDevice)
+            }
         }
-        prefsRepo.saveConfig(finalConfig)
         isSaved = true
-
-        if (AmbientCaptureService.isRunning) {
-            AmbientCaptureService.currentServiceInstance?.reloadConfig()
-        }
 
         Toast.makeText(this, "Saved ${currentDevice.name}", Toast.LENGTH_SHORT).show()
         finish()
@@ -854,6 +844,7 @@ class EditDeviceActivity : AppCompatActivity() {
         Toast.makeText(this, "Identifying ${currentDevice.name} ($ip)...", Toast.LENGTH_SHORT).show()
 
         testJob = lifecycleScope.launch(Dispatchers.IO) {
+            AmbientCaptureService.activeEngine.value?.isTestingOverride = true
             AmbientCaptureService.isTestingOverride = true
             try {
                 val totalLeds = currentDevice.totalLeds
@@ -883,6 +874,7 @@ class EditDeviceActivity : AppCompatActivity() {
                 httpClient.turnOff(ip)
             }
             } finally {
+                AmbientCaptureService.activeEngine.value?.isTestingOverride = false
                 AmbientCaptureService.isTestingOverride = false
             }
         }

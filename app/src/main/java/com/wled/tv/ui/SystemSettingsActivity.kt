@@ -19,7 +19,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import com.wled.tv.BuildConfig
 import com.wled.tv.R
-import com.wled.tv.data.PreferencesRepository
+import com.wled.tv.data.ConfigRepository
 import com.wled.tv.model.WledConfig
 import com.wled.tv.service.AmbientCaptureService
 import com.wled.tv.updater.GitHubUpdateManager
@@ -27,7 +27,7 @@ import com.wled.tv.updater.UpdateInfo
 
 class SystemSettingsActivity : AppCompatActivity() {
 
-    private lateinit var prefsRepo: PreferencesRepository
+    private lateinit var configRepo: ConfigRepository
     private var config: WledConfig = WledConfig()
     private val updateManager = GitHubUpdateManager()
 
@@ -57,8 +57,8 @@ class SystemSettingsActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_system_settings)
 
-        prefsRepo = PreferencesRepository(this)
-        config = prefsRepo.loadConfig()
+        configRepo = ConfigRepository.getInstance(this)
+        config = configRepo.currentConfig
 
         bindViews()
         setupListeners()
@@ -229,11 +229,8 @@ adb shell appops set com.wled.tv PROJECT_MEDIA default
     }
 
     private fun saveAndUpdate() {
-        prefsRepo.saveConfig(config)
+        configRepo.updateConfigBlocking { config }
         updateUiValues()
-        if (AmbientCaptureService.isRunning) {
-            AmbientCaptureService.currentServiceInstance?.reloadConfig()
-        }
     }
 
     private fun updateUiValues() {
@@ -256,7 +253,7 @@ adb shell appops set com.wled.tv PROJECT_MEDIA default
 
     override fun onResume() {
         super.onResume()
-        config = prefsRepo.loadConfig()
+        config = configRepo.currentConfig
         updateUiValues()
     }
 

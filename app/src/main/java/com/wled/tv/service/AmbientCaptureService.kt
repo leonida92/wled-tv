@@ -580,6 +580,7 @@ class AmbientCaptureService : Service() {
 
             try {
                 val view = SamplingOverlayView(this)
+                view.bindEngine(activeEngine)
                 wm.addView(view, params)
                 overlayView = view
                 isOverlayVisible = true
@@ -631,40 +632,9 @@ class AmbientCaptureService : Service() {
     private fun updateOverlayData() {
         val view = overlayView ?: return
         val currentEngine = engine ?: return
-        val devices = currentEngine.config.enabledDevices
-        val overlayList = ArrayList<DeviceOverlayData>(devices.size)
-        for (device in devices) {
-            val leds = device.totalLeds
-            val buf = currentEngine.getDeviceBuffer(device.id)
-            if (leds > 0 && buf != null) {
-                val zones = currentEngine.colorProcessor.getActiveZones(device)
-                val rgbCopy = buf.copyOf(leds * 3)
-                overlayList.add(
-                    DeviceOverlayData(
-                        deviceId = device.id,
-                        deviceName = device.name,
-                        zones = zones,
-                        rgb = rgbCopy,
-                        ledCount = leds
-                    )
-                )
-            }
-        }
-        val fps = currentEngine.latestStats?.fps?.toFloat() ?: 0f
-        val pps = currentEngine.latestStats?.pps ?: 0
         lastOverlayTopCrop = currentEngine.colorProcessor.currentTopCrop
         lastOverlayLeftCrop = currentEngine.colorProcessor.currentLeftCrop
-        view.updateTelemetry(
-            devices = overlayList,
-            currentTopCrop = currentEngine.colorProcessor.currentTopCrop,
-            currentBottomCrop = currentEngine.colorProcessor.currentBottomCrop,
-            currentLeftCrop = currentEngine.colorProcessor.currentLeftCrop,
-            currentRightCrop = currentEngine.colorProcessor.currentRightCrop,
-            fps = fps,
-            pps = pps,
-            isDrmActive = currentEngine.isDrmActive,
-            systemStats = latestSystemStatsString
-        )
+        view.updateFromEngine(currentEngine, latestSystemStatsString)
     }
 
     private fun stopCapture() {

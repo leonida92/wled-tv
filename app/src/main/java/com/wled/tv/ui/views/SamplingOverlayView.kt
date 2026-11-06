@@ -7,6 +7,13 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.util.AttributeSet
 import android.view.View
+import com.wled.tv.engine.AmbientStreamingEngine
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 data class DeviceOverlayData(
@@ -171,6 +178,81 @@ class SamplingOverlayView @JvmOverloads constructor(
         this.cachedSystemStatsWidth = if (systemStats.isNotEmpty()) subBadgeTextPaint.measureText(systemStats) else 0f
 
         postInvalidate()
+    }
+
+    private var engineScope: CoroutineScope? = null
+
+    /**
+     * Binds this overlay view to observe an [activeEngine] StateFlow directly.
+     */
+    fun bindEngine(engineFlow: StateFlow<AmbientStreamingEngine?>) {
+        engineScope?.cancel()
+        engineScope = CoroutineScope(Dispatchers.Main.immediate + SupervisorJob()).apply {
+            launch {
+                engineFlow.collect { engine ->
+                    if (engine != null) {
+                        updateFromEngine(engine)
+                    } else {
+                        updateTelemetry(
+                            devices = emptyList(),
+                            currentTopCrop = 0f,
+                            currentBottomCrop = 0f,
+                            fps = 0f,
+                            pps = 0
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun unbindEngine() {
+        engineScope?.cancel()
+        engineScope = null
+    }
+
+    override fun onDetachedFromWindow() {
+        super.onDetachedFromWindow()
+        unbindEngine()
+    }
+
+    /**
+     * Extracts active fixture sampling zones and live color buffers from [engine]
+     * to update overlay wireframes and telemetry HUD.
+     */
+    fun updateFromEngine(engine: AmbientStreamingEngine, systemStats: String = "") {
+        val devices = engine.config.enabledDevices
+        val overlayList = ArrayList<DeviceOverlayData>(devices.size)
+        for (device in devices) {
+            val leds = device.totalLeds
+            val buf = engine.getDeviceBuffer(device.id)
+            if (leds > 0 && buf != null) {
+                val zones = engine.colorProcessor.getActiveZones(device)
+                val rgbCopy = buf.copyOf(leds * 3)
+                overlayList.add(
+                    DeviceOverlayData(
+                        deviceId = device.id,
+                        deviceName = device.name,
+                        zones = zones,
+                        rgb = rgbCopy,
+                        ledCount = leds
+                    )
+                )
+            }
+        }
+        val fps = engine.latestStats?.fps?.toFloat() ?: 0f
+        val pps = engine.latestStats?.pps ?: 0
+        updateTelemetry(
+            devices = overlayList,
+            currentTopCrop = engine.colorProcessor.currentTopCrop,
+            currentBottomCrop = engine.colorProcessor.currentBottomCrop,
+            currentLeftCrop = engine.colorProcessor.currentLeftCrop,
+            currentRightCrop = engine.colorProcessor.currentRightCrop,
+            fps = fps,
+            pps = pps,
+            isDrmActive = engine.isDrmActive,
+            systemStats = systemStats
+        )
     }
 
     override fun onDraw(canvas: Canvas) {
