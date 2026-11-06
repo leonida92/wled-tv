@@ -1,0 +1,14 @@
+# 03: Slim AmbientCaptureService Adapter
+
+**What to build:** A refactored, lightweight `AmbientCaptureService` that acts solely as an operating system adapter connecting Android hardware APIs (`MediaProjection`, `VirtualDisplay`, `ImageReader`, `NotificationManager`, locks) to the in-process `AmbientStreamingEngine`. It collects configuration updates from `ConfigRepository`, schedules the 60Hz ticker loop, and exposes the active engine instance as an observable stream for safe UI observation.
+
+**Blocked by:** 01: Reactive ConfigRepository, 02: In-Process AmbientStreamingEngine & Clock Abstraction
+
+**Status:** ready-for-agent
+
+- [ ] `AmbientCaptureService` shrinks to a focused adapter (~150-200 lines) stripped of buffer management, DRM state machines, and telemetry calculations.
+- [ ] The service collects `ConfigRepository.configFlow` and forwards new configuration snapshots synchronously to `engine.updateConfig(config)`.
+- [ ] Hardware frames from `ImageReader` are forwarded directly to `engine.onFrameAvailable(...)`.
+- [ ] The background handler executes a steady ticker runnable that calls `engine.tickStreaming(...)` at the configured frame rate.
+- [ ] System standby, daydreaming, and screen-off broadcasts trigger `engine.blackout()`.
+- [ ] The service exposes `val activeEngine: StateFlow<AmbientStreamingEngine?>`, setting the instance when capture starts and clearing it to `null` on stop.
