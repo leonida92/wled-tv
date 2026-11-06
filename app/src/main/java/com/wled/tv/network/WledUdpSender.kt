@@ -9,7 +9,7 @@ import java.net.InetAddress
 import java.net.SocketException
 import java.util.concurrent.ConcurrentHashMap
 
-open class WledUdpSender {
+internal open class WledUdpSender {
 
     @Volatile
     private var socket: DatagramSocket? = null

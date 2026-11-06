@@ -15,7 +15,7 @@ import kotlinx.coroutines.withTimeoutOrNull
  * UDP protocol formatting and HTTP device control, executes concurrent fleet blackouts,
  * and manages an application-scoped singleton lifecycle with a test-injection seam.
  */
-class DefaultWledControllerClient(
+class DefaultWledControllerClient internal constructor(
     private val udpSender: WledUdpSender = WledUdpSender(),
     private val httpClient: WledHttpClient = WledHttpClient()
 ) : WledControllerClient {
