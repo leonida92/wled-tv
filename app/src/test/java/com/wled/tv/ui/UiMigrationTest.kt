@@ -166,6 +166,9 @@ class UiMigrationTest {
         val mainControllerField = MainActivity::class.java.getDeclaredField("controllerClient")
         assertTrue(WledControllerClient::class.java.isAssignableFrom(mainControllerField.type))
 
+        val mainMethods = MainActivity::class.java.declaredMethods.map { it.name }
+        assertTrue("MainActivity must declare turnOffAllLeds", mainMethods.contains("turnOffAllLeds"))
+
         // CalibrationActivity: must use controllerClient and have no raw udpSender field
         val calibFields = CalibrationActivity::class.java.declaredFields.map { it.name }
         assertFalse("CalibrationActivity must not declare udpSender", calibFields.contains("udpSender"))

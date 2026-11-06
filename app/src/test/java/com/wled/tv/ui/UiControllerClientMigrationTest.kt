@@ -84,11 +84,13 @@ class UiControllerClientMigrationTest {
 
     @Test
     fun deviceManager_toggleDevice_updatesPowerViaControllerClient() = runBlocking {
-        // Toggle off
+        // Toggle off: calls blackoutFleet(listOf(updatedDevice), sendPowerOff = true)
         val disabledDevice = testDevice.copy(enabled = false)
         repo.updateConfig { cur -> cur.copy(devices = listOf(disabledDevice)) }
-        fakeClient.turnOff(disabledDevice.ip)
+        fakeClient.blackoutFleet(listOf(disabledDevice), sendPowerOff = true)
         assertEquals(false, fakeClient.powerState[disabledDevice.ip])
+        assertEquals(1, fakeClient.blackoutCalls)
+        assertEquals(3, fakeClient.sentFrames.size)
 
         // Toggle back on
         val enabledDevice = disabledDevice.copy(enabled = true)
@@ -104,12 +106,62 @@ class UiControllerClientMigrationTest {
         repo.updateConfig { cur -> cur.copy(devices = listOf(testDevice)) }
         assertEquals(1, repo.currentConfig.devices.size)
 
-        // Deletion flow
+        // Deletion flow in DeviceManagerActivity: calls blackoutFleet(listOf(device), sendPowerOff = true)
         repo.updateConfig { cur -> cur.copy(devices = cur.devices.filterNot { it.id == testDevice.id }) }
-        fakeClient.turnOff(testDevice.ip)
+        fakeClient.blackoutFleet(listOf(testDevice), sendPowerOff = true)
 
         assertEquals(0, repo.currentConfig.devices.size)
         assertEquals(false, fakeClient.powerState[testDevice.ip])
+        assertEquals(1, fakeClient.blackoutCalls)
+        assertEquals(3, fakeClient.sentFrames.size)
+    }
+
+    @Test
+    fun editDevice_deleteDevice_blackoutsViaControllerClient() = runBlocking {
+        repo.updateConfig { cur -> cur.copy(devices = listOf(testDevice)) }
+        assertEquals(1, repo.currentConfig.devices.size)
+
+        // Deletion flow in EditDeviceActivity: calls blackoutFleet(listOf(deviceToDelete), sendPowerOff = true)
+        repo.updateConfig { cur -> cur.copy(devices = cur.devices.filterNot { it.id == testDevice.id }) }
+        fakeClient.blackoutFleet(listOf(testDevice), sendPowerOff = true)
+
+        assertEquals(0, repo.currentConfig.devices.size)
+        assertEquals(false, fakeClient.powerState[testDevice.ip])
+        assertEquals(1, fakeClient.blackoutCalls)
+        assertEquals(3, fakeClient.sentFrames.size)
+    }
+
+    @Test
+    fun mainActivity_turnOffAllLeds_blackoutsEnabledDevicesWithoutPowerOff() = runBlocking {
+        val dev1 = testDevice.copy(id = "dev1", ip = "192.168.1.10", enabled = true)
+        val dev2 = testDevice.copy(id = "dev2", ip = "192.168.1.11", enabled = true)
+        val enabledDevices = listOf(dev1, dev2)
+
+        // In MainActivity: turnOffAllLeds() -> controllerClient.blackoutFleet(config.enabledDevices, sendPowerOff = false)
+        fakeClient.blackoutFleet(enabledDevices, sendPowerOff = false)
+
+        assertEquals(1, fakeClient.blackoutCalls)
+        assertEquals(6, fakeClient.sentFrames.size)
+        // Grouped sequential bursts: dev1, dev1, dev1, dev2, dev2, dev2
+        assertEquals("dev1", fakeClient.sentFrames[0].device.id)
+        assertEquals("dev1", fakeClient.sentFrames[1].device.id)
+        assertEquals("dev1", fakeClient.sentFrames[2].device.id)
+        assertEquals("dev2", fakeClient.sentFrames[3].device.id)
+        assertEquals("dev2", fakeClient.sentFrames[4].device.id)
+        assertEquals("dev2", fakeClient.sentFrames[5].device.id)
+        assertTrue(fakeClient.powerState.isEmpty())
+    }
+
+    @Test
+    fun mainActivity_toggleDeviceDisable_blackoutsDeviceWithPowerOff() = runBlocking {
+        val disabledDevice = testDevice.copy(enabled = false)
+
+        // In MainActivity: toggleDeviceEnabled() when !newEnabled -> controllerClient.blackoutFleet(listOf(updatedDevice), sendPowerOff = true)
+        fakeClient.blackoutFleet(listOf(disabledDevice), sendPowerOff = true)
+
+        assertEquals(1, fakeClient.blackoutCalls)
+        assertEquals(3, fakeClient.sentFrames.size)
+        assertEquals(false, fakeClient.powerState[disabledDevice.ip])
     }
 
     @Test

@@ -797,7 +797,7 @@ class EditDeviceActivity : AppCompatActivity() {
                     }
                     isSaved = true
 
-                    controllerClient.turnOff(deviceToDelete.ip)
+                    controllerClient.blackoutFleet(listOf(deviceToDelete), sendPowerOff = true)
 
                     Toast.makeText(this@EditDeviceActivity, "Deleted ${deviceToDelete.name}", Toast.LENGTH_SHORT).show()
                     finish()
