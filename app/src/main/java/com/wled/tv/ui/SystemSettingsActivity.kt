@@ -198,39 +198,46 @@ adb shell appops set com.wled.tv PROJECT_MEDIA default
     }
 
     private fun cycleFps() {
-        val nextFps = when (config.calibration.fps) {
-            15 -> 30
-            30 -> 60
-            else -> 15
+        lifecycleScope.launch {
+            config = configRepo.updateConfig { current ->
+                val nextFps = when (current.calibration.fps) {
+                    15 -> 30
+                    30 -> 60
+                    else -> 15
+                }
+                current.copy(calibration = current.calibration.copy(fps = nextFps))
+            }
+            updateUiValues()
         }
-        config = config.copy(calibration = config.calibration.copy(fps = nextFps))
-        saveAndUpdate()
     }
 
     private fun cycleResolution() {
-        val (nextWidth, nextHeight) = when (config.calibration.captureWidth) {
-            80 -> Pair(160, 90)
-            160 -> Pair(320, 180)
-            320 -> Pair(480, 270)
-            else -> Pair(80, 45)
+        lifecycleScope.launch {
+            config = configRepo.updateConfig { current ->
+                val (nextWidth, nextHeight) = when (current.calibration.captureWidth) {
+                    80 -> Pair(160, 90)
+                    160 -> Pair(320, 180)
+                    320 -> Pair(480, 270)
+                    else -> Pair(80, 45)
+                }
+                current.copy(
+                    calibration = current.calibration.copy(
+                        captureWidth = nextWidth,
+                        captureHeight = nextHeight
+                    )
+                )
+            }
+            updateUiValues()
         }
-        config = config.copy(
-            calibration = config.calibration.copy(
-                captureWidth = nextWidth,
-                captureHeight = nextHeight
-            )
-        )
-        saveAndUpdate()
     }
 
     private fun toggleAutoStart() {
-        config = config.copy(autoStartOnBoot = !config.autoStartOnBoot)
-        saveAndUpdate()
-    }
-
-    private fun saveAndUpdate() {
-        configRepo.updateConfigBlocking { config }
-        updateUiValues()
+        lifecycleScope.launch {
+            config = configRepo.updateConfig { current ->
+                current.copy(autoStartOnBoot = !current.autoStartOnBoot)
+            }
+            updateUiValues()
+        }
     }
 
     private fun updateUiValues() {
@@ -256,7 +263,6 @@ adb shell appops set com.wled.tv PROJECT_MEDIA default
         config = configRepo.currentConfig
         updateUiValues()
     }
-
 
     private fun performUpdateCheck() {
         if (isCheckingUpdate) return

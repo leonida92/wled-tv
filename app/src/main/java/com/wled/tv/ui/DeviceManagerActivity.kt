@@ -24,7 +24,6 @@ import com.wled.tv.network.DiscoveredWled
 import com.wled.tv.network.WledDiscovery
 import com.wled.tv.network.WledHttpClient
 import com.wled.tv.network.WledUdpSender
-import com.wled.tv.service.AmbientCaptureService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -137,7 +136,7 @@ class DeviceManagerActivity : AppCompatActivity() {
         layoutDeviceList.removeAllViews()
 
         val inflater = LayoutInflater.from(this)
-        for ((index, device) in config.devices.withIndex()) {
+        for (device in config.devices) {
             val card = inflater.inflate(R.layout.item_device_card, layoutDeviceList, false)
 
             val viewDot = card.findViewById<View>(R.id.viewDeviceStatusDot)
@@ -177,44 +176,54 @@ class DeviceManagerActivity : AppCompatActivity() {
             }
 
             btnToggle.setOnClickListener {
-                val currentDev = config.devices.getOrNull(index) ?: return@setOnClickListener
-                val newEnabled = !currentDev.enabled
-                val updatedList = config.devices.toMutableList()
-                val updatedDevice = currentDev.copy(enabled = newEnabled)
-                updatedList[index] = updatedDevice
-                config = config.copy(devices = updatedList)
-                saveAndUpdate()
-
-                if (newEnabled) {
-                    btnToggle.text = "ON"
-                    btnToggle.setTextColor(Color.parseColor("#00E676"))
-                    updateDeviceDot(updatedDevice.id, true, deviceReachabilityMap[updatedDevice.id])
-                } else {
-                    btnToggle.text = "OFF"
-                    btnToggle.setTextColor(Color.parseColor("#94A3B8"))
-                    updateDeviceDot(updatedDevice.id, false, null)
-                }
-
-                lifecycleScope.launch(Dispatchers.IO) {
-                    if (newEnabled) {
-                        val reachable = httpClient.checkConnection(updatedDevice.ip)
-                        deviceReachabilityMap[updatedDevice.id] = reachable
-                        withContext(Dispatchers.Main) {
-                            updateDeviceDot(updatedDevice.id, true, reachable)
+                val targetId = device.id
+                lifecycleScope.launch {
+                    var newEnabledState = false
+                    var targetDevice: WledDevice? = null
+                    config = configRepo.updateConfig { current ->
+                        val target = current.devices.firstOrNull { it.id == targetId }
+                        if (target != null) {
+                            val newEnabled = !target.enabled
+                            newEnabledState = newEnabled
+                            val updated = target.copy(enabled = newEnabled)
+                            targetDevice = updated
+                            current.updateDevice(updated)
+                        } else {
+                            current
                         }
-                        httpClient.wakeAndSetBrightness(updatedDevice.ip, updatedDevice.calibration.maxBrightness)
+                    }
+                    val updatedDevice = targetDevice ?: return@launch
+                    if (newEnabledState) {
+                        btnToggle.text = "ON"
+                        btnToggle.setTextColor(Color.parseColor("#00E676"))
+                        updateDeviceDot(updatedDevice.id, true, deviceReachabilityMap[updatedDevice.id])
                     } else {
-                        val totalLeds = updatedDevice.totalLeds
-                        if (totalLeds > 0) {
-                            val blackFrame = ByteArray(totalLeds * 3)
-                            udpSender.sendDeviceFrame(
-                                device = updatedDevice,
-                                rgb = blackFrame,
-                                ledCount = totalLeds,
-                                timeoutSeconds = 2
-                            )
+                        btnToggle.text = "OFF"
+                        btnToggle.setTextColor(Color.parseColor("#94A3B8"))
+                        updateDeviceDot(updatedDevice.id, false, null)
+                    }
+
+                    lifecycleScope.launch(Dispatchers.IO) {
+                        if (newEnabledState) {
+                            val reachable = httpClient.checkConnection(updatedDevice.ip)
+                            deviceReachabilityMap[updatedDevice.id] = reachable
+                            withContext(Dispatchers.Main) {
+                                updateDeviceDot(updatedDevice.id, true, reachable)
+                            }
+                            httpClient.wakeAndSetBrightness(updatedDevice.ip, updatedDevice.calibration.maxBrightness)
+                        } else {
+                            val totalLeds = updatedDevice.totalLeds
+                            if (totalLeds > 0) {
+                                val blackFrame = ByteArray(totalLeds * 3)
+                                udpSender.sendDeviceFrame(
+                                    device = updatedDevice,
+                                    rgb = blackFrame,
+                                    ledCount = totalLeds,
+                                    timeoutSeconds = 2
+                                )
+                            }
+                            httpClient.turnOff(updatedDevice.ip)
                         }
-                        httpClient.turnOff(updatedDevice.ip)
                     }
                 }
             }
@@ -239,17 +248,19 @@ class DeviceManagerActivity : AppCompatActivity() {
                         .setTitle("Remove Light Device")
                         .setMessage("Are you sure you want to remove '${device.name}'?")
                         .setPositiveButton("Remove") { _, _ ->
-                            val updatedList = config.devices.toMutableList()
-                            updatedList.removeAt(index)
-                            config = config.copy(devices = updatedList)
-                            saveAndUpdate()
-                            renderDeviceList()
-                            lifecycleScope.launch(Dispatchers.IO) {
-                                val totalLeds = device.totalLeds
-                                if (totalLeds > 0) {
-                                    udpSender.sendDeviceFrame(device, ByteArray(totalLeds * 3), totalLeds, timeoutSeconds = 2)
+                            val targetId = device.id
+                            lifecycleScope.launch {
+                                config = configRepo.updateConfig { current ->
+                                    current.copy(devices = current.devices.filterNot { it.id == targetId })
                                 }
-                                httpClient.turnOff(device.ip)
+                                renderDeviceList()
+                                lifecycleScope.launch(Dispatchers.IO) {
+                                    val totalLeds = device.totalLeds
+                                    if (totalLeds > 0) {
+                                        udpSender.sendDeviceFrame(device, ByteArray(totalLeds * 3), totalLeds, timeoutSeconds = 2)
+                                    }
+                                    httpClient.turnOff(device.ip)
+                                }
                             }
                         }
                         .setNegativeButton("Cancel", null)
@@ -338,9 +349,5 @@ class DeviceManagerActivity : AppCompatActivity() {
                     .show()
             }
         }
-    }
-
-    private fun saveAndUpdate() {
-        configRepo.updateConfigBlocking { config }
     }
 }

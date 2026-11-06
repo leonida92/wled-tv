@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** completed
+**Status:** resolved
 
 - [x] `ConfigRepository` exposes `val configFlow: StateFlow<WledConfig>` emitting immutable configuration snapshots.
 - [x] `ConfigRepository` exposes `val currentConfig: WledConfig` for synchronous immediate reads.

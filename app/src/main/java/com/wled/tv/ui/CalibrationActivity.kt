@@ -152,15 +152,17 @@ class CalibrationActivity : AppCompatActivity() {
         btnColorYellow.setOnClickListener { selectColorMode(Triple(255, 255, 0), "Yellow") }
 
         setupSliderItem(itemSaturation, step = 0.1f, onAdjust = { delta ->
-            val c = currentCalibration
-            val newSat = ((c.saturation + delta) * 10f).roundToInt() / 10f
-            updateTargetCalibration(c.copy(saturation = newSat.coerceIn(0.5f, 3.0f)))
+            updateTargetCalibration { c ->
+                val newSat = ((c.saturation + delta) * 10f).roundToInt() / 10f
+                c.copy(saturation = newSat.coerceIn(0.5f, 3.0f))
+            }
         })
 
         setupSliderItem(itemContrast, step = 0.05f, onAdjust = { delta ->
-            val c = currentCalibration
-            val newContrast = ((c.contrast + delta) * 100f).roundToInt() / 100f
-            updateTargetCalibration(c.copy(contrast = newContrast.coerceIn(0.5f, 1.5f)))
+            updateTargetCalibration { c ->
+                val newContrast = ((c.contrast + delta) * 100f).roundToInt() / 100f
+                c.copy(contrast = newContrast.coerceIn(0.5f, 1.5f))
+            }
         })
 
         itemColorOrder.setOnClickListener { cycleColorOrder(1) }
@@ -175,48 +177,55 @@ class CalibrationActivity : AppCompatActivity() {
         }
 
         setupSliderItem(itemBrightness, step = 12.75f, onAdjust = { delta ->
-            val c = currentCalibration
-            val newBri = (c.maxBrightness + delta.toInt()).coerceIn(25, 255)
-            updateTargetCalibration(c.copy(maxBrightness = newBri))
+            updateTargetCalibration { c ->
+                val newBri = (c.maxBrightness + delta.toInt()).coerceIn(25, 255)
+                c.copy(maxBrightness = newBri)
+            }
         })
 
         // Black level cutoff slider (0 to 50, step 2)
         setupSliderItem(itemBlackThreshold, step = 2f, onAdjust = { delta ->
-            val c = currentCalibration
-            val newThreshold = (c.blackThreshold + delta.toInt()).coerceIn(0, 50)
-            updateTargetCalibration(c.copy(blackThreshold = newThreshold))
+            updateTargetCalibration { c ->
+                val newThreshold = (c.blackThreshold + delta.toInt()).coerceIn(0, 50)
+                c.copy(blackThreshold = newThreshold)
+            }
         })
 
         setupSliderItem(itemGainR, step = 0.05f, onAdjust = { delta ->
-            val c = currentCalibration
-            val newGain = ((c.gainR + delta) * 100f).roundToInt() / 100f
-            updateTargetCalibration(c.copy(gainR = newGain.coerceIn(0.2f, 2.5f)))
+            updateTargetCalibration { c ->
+                val newGain = ((c.gainR + delta) * 100f).roundToInt() / 100f
+                c.copy(gainR = newGain.coerceIn(0.2f, 2.5f))
+            }
         })
 
         setupSliderItem(itemGainG, step = 0.05f, onAdjust = { delta ->
-            val c = currentCalibration
-            val newGain = ((c.gainG + delta) * 100f).roundToInt() / 100f
-            updateTargetCalibration(c.copy(gainG = newGain.coerceIn(0.2f, 2.5f)))
+            updateTargetCalibration { c ->
+                val newGain = ((c.gainG + delta) * 100f).roundToInt() / 100f
+                c.copy(gainG = newGain.coerceIn(0.2f, 2.5f))
+            }
         })
 
         setupSliderItem(itemGainB, step = 0.05f, onAdjust = { delta ->
-            val c = currentCalibration
-            val newGain = ((c.gainB + delta) * 100f).roundToInt() / 100f
-            updateTargetCalibration(c.copy(gainB = newGain.coerceIn(0.2f, 2.5f)))
+            updateTargetCalibration { c ->
+                val newGain = ((c.gainB + delta) * 100f).roundToInt() / 100f
+                c.copy(gainB = newGain.coerceIn(0.2f, 2.5f))
+            }
         })
 
         setupSliderItem(itemSmoothing, step = 0.05f, onAdjust = { delta ->
-            val c = currentCalibration
-            val newSmooth = ((c.smoothingFactor + delta) * 100f).roundToInt() / 100f
-            updateTargetCalibration(c.copy(smoothingFactor = newSmooth.coerceIn(0.05f, 1.0f)))
+            updateTargetCalibration { c ->
+                val newSmooth = ((c.smoothingFactor + delta) * 100f).roundToInt() / 100f
+                c.copy(smoothingFactor = newSmooth.coerceIn(0.05f, 1.0f))
+            }
         })
     }
 
     private fun cycleColorOrder(direction: Int) {
-        val current = currentCalibration.colorOrder
-        val currentIndex = colorOrders.indexOf(current).let { if (it < 0) 0 else it }
-        val newIndex = (currentIndex + direction + colorOrders.size) % colorOrders.size
-        updateTargetCalibration(currentCalibration.copy(colorOrder = colorOrders[newIndex]))
+        updateTargetCalibration { c ->
+            val currentIndex = colorOrders.indexOf(c.colorOrder).let { if (it < 0) 0 else it }
+            val newIndex = (currentIndex + direction + colorOrders.size) % colorOrders.size
+            c.copy(colorOrder = colorOrders[newIndex])
+        }
     }
 
     private fun selectColorMode(rgb: Triple<Int, Int, Int>?, title: String) {
@@ -236,11 +245,11 @@ class CalibrationActivity : AppCompatActivity() {
             viewRefBarLeft.setBackgroundColor(colorInt)
             viewRefBarRight.setBackgroundColor(colorInt)
 
-            startTestColorStream()
+            startTestTestColorStream()
         }
     }
 
-    private fun startTestColorStream() {
+    private fun startTestTestColorStream() {
         testColorJob?.cancel()
         AmbientCaptureService.activeEngine.value?.isTestingOverride = true
 
@@ -301,21 +310,19 @@ class CalibrationActivity : AppCompatActivity() {
         }
     }
 
-    private fun updateTargetCalibration(newCalibration: ColorCalibration) {
-        val dev = targetDevice
-        val updatedDev = dev.copy(
-            calibration = newCalibration
-        )
-        config = config.updateDevice(updatedDev)
-        saveAndUpdate()
-    }
-
-    private fun saveAndUpdate() {
-        configRepo.updateConfigBlocking { cur ->
-            cur.updateDevice(targetDevice)
+    private fun updateTargetCalibration(transform: (ColorCalibration) -> ColorCalibration) {
+        lifecycleScope.launch {
+            val targetId = targetDeviceId
+            config = configRepo.updateConfig { cur ->
+                val dev = if (targetId != null) {
+                    cur.devices.firstOrNull { it.id == targetId } ?: cur.primaryDevice
+                } else {
+                    cur.primaryDevice
+                }
+                cur.updateDevice(dev.copy(calibration = transform(dev.calibration)))
+            }
+            updateUiValues()
         }
-        config = configRepo.currentConfig
-        updateUiValues()
     }
 
     private fun updateUiValues() {

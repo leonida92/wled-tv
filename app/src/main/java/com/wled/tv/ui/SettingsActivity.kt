@@ -7,6 +7,8 @@ import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import com.wled.tv.R
 import com.wled.tv.data.ConfigRepository
 import com.wled.tv.model.Corner
@@ -14,7 +16,6 @@ import com.wled.tv.model.Direction
 import com.wled.tv.model.PerimeterConfig
 import com.wled.tv.model.WledConfig
 import com.wled.tv.model.WledDevice
-import com.wled.tv.service.AmbientCaptureService
 
 class SettingsActivity : AppCompatActivity() {
 
@@ -95,27 +96,31 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         setupLedCountStepper(itemTopLeds, onAdjust = { delta ->
-            val p = targetDevice.perimeter
-            val newCount = (p.topLeds + delta).coerceIn(0, 300)
-            updateTargetPerimeter(p.copy(topLeds = newCount))
+            updateTargetPerimeter { p ->
+                val newCount = (p.topLeds + delta).coerceIn(0, 300)
+                p.copy(topLeds = newCount)
+            }
         })
 
         setupLedCountStepper(itemRightLeds, onAdjust = { delta ->
-            val p = targetDevice.perimeter
-            val newCount = (p.rightLeds + delta).coerceIn(0, 300)
-            updateTargetPerimeter(p.copy(rightLeds = newCount))
+            updateTargetPerimeter { p ->
+                val newCount = (p.rightLeds + delta).coerceIn(0, 300)
+                p.copy(rightLeds = newCount)
+            }
         })
 
         setupLedCountStepper(itemBottomLeds, onAdjust = { delta ->
-            val p = targetDevice.perimeter
-            val newCount = (p.bottomLeds + delta).coerceIn(0, 300)
-            updateTargetPerimeter(p.copy(bottomLeds = newCount))
+            updateTargetPerimeter { p ->
+                val newCount = (p.bottomLeds + delta).coerceIn(0, 300)
+                p.copy(bottomLeds = newCount)
+            }
         })
 
         setupLedCountStepper(itemLeftLeds, onAdjust = { delta ->
-            val p = targetDevice.perimeter
-            val newCount = (p.leftLeds + delta).coerceIn(0, 300)
-            updateTargetPerimeter(p.copy(leftLeds = newCount))
+            updateTargetPerimeter { p ->
+                val newCount = (p.leftLeds + delta).coerceIn(0, 300)
+                p.copy(leftLeds = newCount)
+            }
         })
 
         itemStartCorner.setOnClickListener { cycleCorner() }
@@ -135,11 +140,19 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
-    private fun updateTargetPerimeter(newPerimeter: PerimeterConfig) {
-        val dev = targetDevice
-        val updatedDev = dev.copy(perimeter = newPerimeter)
-        config = config.updateDevice(updatedDev)
-        saveAndUpdate()
+    private fun updateTargetPerimeter(transform: (PerimeterConfig) -> PerimeterConfig) {
+        lifecycleScope.launch {
+            config = configRepo.updateConfig { current ->
+                val targetId = targetDeviceId
+                val dev = if (targetId != null) {
+                    current.devices.firstOrNull { it.id == targetId } ?: current.primaryDevice
+                } else {
+                    current.primaryDevice
+                }
+                current.updateDevice(dev.copy(perimeter = transform(dev.perimeter)))
+            }
+            updateUiValues()
+        }
     }
 
     private fun setupLedCountStepper(view: View, onAdjust: (Int) -> Unit) {
@@ -162,29 +175,26 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun cycleCorner() {
-        val p = targetDevice.perimeter
-        val nextCorner = when (p.startCorner) {
-            Corner.BOTTOM_LEFT -> Corner.TOP_LEFT
-            Corner.TOP_LEFT -> Corner.TOP_RIGHT
-            Corner.TOP_RIGHT -> Corner.BOTTOM_RIGHT
-            Corner.BOTTOM_RIGHT -> Corner.BOTTOM_LEFT
+        updateTargetPerimeter { p ->
+            val nextCorner = when (p.startCorner) {
+                Corner.BOTTOM_LEFT -> Corner.TOP_LEFT
+                Corner.TOP_LEFT -> Corner.TOP_RIGHT
+                Corner.TOP_RIGHT -> Corner.BOTTOM_RIGHT
+                Corner.BOTTOM_RIGHT -> Corner.BOTTOM_LEFT
+            }
+            p.copy(startCorner = nextCorner)
         }
-        updateTargetPerimeter(p.copy(startCorner = nextCorner))
     }
 
     private fun cycleDirection() {
-        val p = targetDevice.perimeter
-        val nextDir = if (p.direction == Direction.CLOCKWISE) {
-            Direction.COUNTER_CLOCKWISE
-        } else {
-            Direction.CLOCKWISE
+        updateTargetPerimeter { p ->
+            val nextDir = if (p.direction == Direction.CLOCKWISE) {
+                Direction.COUNTER_CLOCKWISE
+            } else {
+                Direction.CLOCKWISE
+            }
+            p.copy(direction = nextDir)
         }
-        updateTargetPerimeter(p.copy(direction = nextDir))
-    }
-
-    private fun saveAndUpdate() {
-        configRepo.updateConfigBlocking { config }
-        updateUiValues()
     }
 
     private fun updateUiValues() {

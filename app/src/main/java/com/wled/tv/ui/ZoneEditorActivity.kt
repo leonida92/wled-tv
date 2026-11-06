@@ -7,11 +7,12 @@ import android.view.View
 import android.widget.Button
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import com.wled.tv.R
 import com.wled.tv.data.ConfigRepository
 import com.wled.tv.model.AspectRatioPreset
 import com.wled.tv.model.WledConfig
-import com.wled.tv.service.AmbientCaptureService
 import com.wled.tv.ui.views.ActiveBorder
 import com.wled.tv.ui.views.ZoneCanvasView
 import java.util.Locale
@@ -44,6 +45,12 @@ class ZoneEditorActivity : AppCompatActivity() {
 
         bindViews()
         setupListeners()
+        updateUi()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        config = configRepo.currentConfig
         updateUi()
     }
 
@@ -155,78 +162,104 @@ class ZoneEditorActivity : AppCompatActivity() {
     }
 
     private fun toggleAutoDetect() {
-        val current = config.perimeter.autoLetterbox
-        val newAuto = !current
-        val updatedDevices = config.devices.map { dev ->
-            dev.copy(perimeter = dev.perimeter.copy(autoLetterbox = newAuto))
+        lifecycleScope.launch {
+            config = configRepo.updateConfig { current ->
+                val newAuto = !current.perimeter.autoLetterbox
+                val updatedDevices = current.devices.map { dev ->
+                    dev.copy(perimeter = dev.perimeter.copy(autoLetterbox = newAuto))
+                }
+                current.copy(devices = updatedDevices)
+            }
+            updateUi()
         }
-        config = config.copy(devices = updatedDevices)
-        saveAndUpdate()
     }
 
     private fun cycleAspectRatioPreset() {
-        val current = config.perimeter.getActiveAspectRatioPreset()
-        val allPresets = AspectRatioPreset.values().filter { it != AspectRatioPreset.CUSTOM }
-        val currentIndex = allPresets.indexOf(current)
-        val nextPreset = if (currentIndex < 0 || currentIndex >= allPresets.size - 1) {
-            allPresets[0]
-        } else {
-            allPresets[currentIndex + 1]
+        lifecycleScope.launch {
+            config = configRepo.updateConfig { current ->
+                val activePreset = current.perimeter.getActiveAspectRatioPreset()
+                val allPresets = AspectRatioPreset.values().filter { it != AspectRatioPreset.CUSTOM }
+                val currentIndex = allPresets.indexOf(activePreset)
+                val nextPreset = if (currentIndex < 0 || currentIndex >= allPresets.size - 1) {
+                    allPresets[0]
+                } else {
+                    allPresets[currentIndex + 1]
+                }
+                val updatedDevices = current.devices.map { dev ->
+                    dev.copy(
+                        perimeter = dev.perimeter.copy(
+                            topCrop = nextPreset.topCrop,
+                            bottomCrop = nextPreset.bottomCrop,
+                            leftCrop = nextPreset.leftCrop,
+                            rightCrop = nextPreset.rightCrop,
+                            autoLetterbox = false
+                        )
+                    )
+                }
+                current.copy(devices = updatedDevices)
+            }
+            updateUi()
         }
-        resetToAspectPreset(nextPreset)
     }
 
     private fun resetToAspectPreset(preset: AspectRatioPreset) {
-        val updatedDevices = config.devices.map { dev ->
-            dev.copy(
-                perimeter = dev.perimeter.copy(
-                    topCrop = preset.topCrop,
-                    bottomCrop = preset.bottomCrop,
-                    leftCrop = preset.leftCrop,
-                    rightCrop = preset.rightCrop,
-                    autoLetterbox = false
-                )
-            )
+        lifecycleScope.launch {
+            config = configRepo.updateConfig { current ->
+                val updatedDevices = current.devices.map { dev ->
+                    dev.copy(
+                        perimeter = dev.perimeter.copy(
+                            topCrop = preset.topCrop,
+                            bottomCrop = preset.bottomCrop,
+                            leftCrop = preset.leftCrop,
+                            rightCrop = preset.rightCrop,
+                            autoLetterbox = false
+                        )
+                    )
+                }
+                current.copy(devices = updatedDevices)
+            }
+            updateUi()
         }
-        config = config.copy(devices = updatedDevices)
-        saveAndUpdate()
     }
 
     private fun adjustActiveBorder(delta: Float) {
-        val p = config.perimeter
-        val newTop = if (activeBorder == ActiveBorder.TOP) (p.topCrop + delta).coerceIn(0f, 0.40f) else p.topCrop
-        val newBottom = if (activeBorder == ActiveBorder.BOTTOM) (p.bottomCrop + delta).coerceIn(0f, 0.40f) else p.bottomCrop
-        val newLeft = if (activeBorder == ActiveBorder.LEFT) (p.leftCrop + delta).coerceIn(0f, 0.40f) else p.leftCrop
-        val newRight = if (activeBorder == ActiveBorder.RIGHT) (p.rightCrop + delta).coerceIn(0f, 0.40f) else p.rightCrop
+        val border = activeBorder
+        lifecycleScope.launch {
+            config = configRepo.updateConfig { current ->
+                val p = current.perimeter
+                val newTop = if (border == ActiveBorder.TOP) (p.topCrop + delta).coerceIn(0f, 0.40f) else p.topCrop
+                val newBottom = if (border == ActiveBorder.BOTTOM) (p.bottomCrop + delta).coerceIn(0f, 0.40f) else p.bottomCrop
+                val newLeft = if (border == ActiveBorder.LEFT) (p.leftCrop + delta).coerceIn(0f, 0.40f) else p.leftCrop
+                val newRight = if (border == ActiveBorder.RIGHT) (p.rightCrop + delta).coerceIn(0f, 0.40f) else p.rightCrop
 
-        val updatedDevices = config.devices.map { dev ->
-            dev.copy(
-                perimeter = dev.perimeter.copy(
-                    topCrop = newTop,
-                    bottomCrop = newBottom,
-                    leftCrop = newLeft,
-                    rightCrop = newRight,
-                    autoLetterbox = false
-                )
-            )
+                val updatedDevices = current.devices.map { dev ->
+                    dev.copy(
+                        perimeter = dev.perimeter.copy(
+                            topCrop = newTop,
+                            bottomCrop = newBottom,
+                            leftCrop = newLeft,
+                            rightCrop = newRight,
+                            autoLetterbox = false
+                        )
+                    )
+                }
+                current.copy(devices = updatedDevices)
+            }
+            updateUi()
         }
-        config = config.copy(devices = updatedDevices)
-        saveAndUpdate()
     }
 
     private fun adjustDepth(delta: Float) {
-        val current = config.perimeter.depth
-        val newDepth = (current + delta).coerceIn(0.03f, 0.30f)
-        val updatedDevices = config.devices.map { dev ->
-            dev.copy(perimeter = dev.perimeter.copy(depth = newDepth))
+        lifecycleScope.launch {
+            config = configRepo.updateConfig { current ->
+                val newDepth = (current.perimeter.depth + delta).coerceIn(0.03f, 0.30f)
+                val updatedDevices = current.devices.map { dev ->
+                    dev.copy(perimeter = dev.perimeter.copy(depth = newDepth))
+                }
+                current.copy(devices = updatedDevices)
+            }
+            updateUi()
         }
-        config = config.copy(devices = updatedDevices)
-        saveAndUpdate()
-    }
-
-    private fun saveAndUpdate() {
-        configRepo.updateConfigBlocking { config }
-        updateUi()
     }
 
     private fun updateUi() {
