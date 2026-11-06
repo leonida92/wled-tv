@@ -2,10 +2,12 @@ package com.wled.tv.network
 
 import android.util.Log
 import com.wled.tv.model.WledDevice
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
@@ -44,7 +46,7 @@ class DefaultWledControllerClient internal constructor(
         return httpClient.fetchDeviceInfo(ip)
     }
 
-    override suspend fun blackoutFleet(devices: List<WledDevice>, sendPowerOff: Boolean) {
+    override suspend fun blackoutFleet(devices: List<WledDevice>, sendPowerOff: Boolean): Unit = withContext(Dispatchers.IO) {
         // 1. Immediately send zeroed UDP bursts sequentially to all devices
         for (device in devices) {
             val leds = device.totalLeds
@@ -78,9 +80,9 @@ class DefaultWledControllerClient internal constructor(
         }
     }
 
-    override suspend fun flashDevice(device: WledDevice, durationMs: Long) {
+    override suspend fun flashDevice(device: WledDevice, durationMs: Long): Unit = withContext(Dispatchers.IO) {
         val leds = device.totalLeds
-        if (leds <= 0) return
+        if (leds <= 0) return@withContext
 
         val whiteFrame = ByteArray(leds * 3) { 255.toByte() }
         val blackFrame = ByteArray(leds * 3)

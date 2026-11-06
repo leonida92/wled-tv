@@ -228,6 +228,14 @@ class DefaultWledControllerClientTest {
             assertEquals(6, frame.ledCount)
         }
 
+        // Sequential bursts: dev1, dev1, dev1, then dev2, dev2, dev2
+        assertEquals("dev1", fakeUdpSender.sentFrames[0].device.id)
+        assertEquals("dev1", fakeUdpSender.sentFrames[1].device.id)
+        assertEquals("dev1", fakeUdpSender.sentFrames[2].device.id)
+        assertEquals("dev2", fakeUdpSender.sentFrames[3].device.id)
+        assertEquals("dev2", fakeUdpSender.sentFrames[4].device.id)
+        assertEquals("dev2", fakeUdpSender.sentFrames[5].device.id)
+
         // sendPowerOff = false should not invoke turnOff
         assertTrue(fakeHttpClient.turnOffCalls.isEmpty())
     }
@@ -348,6 +356,19 @@ class DefaultWledControllerClientTest {
         assertEquals(1, fake.blackoutCalls)
         assertEquals(false, fake.powerState["192.168.1.90"])
 
+        // Verify sequential bursts grouping for multiple devices
+        val fakeDev1 = createDevice(id = "fd1", ip = "192.168.1.101", totalLeds = 4)
+        val fakeDev2 = createDevice(id = "fd2", ip = "192.168.1.102", totalLeds = 4)
+        val multiFake = FakeWledControllerClient()
+        multiFake.blackoutFleet(listOf(fakeDev1, fakeDev2), sendPowerOff = false)
+        assertEquals(6, multiFake.sentFrames.size)
+        assertEquals("fd1", multiFake.sentFrames[0].device.id)
+        assertEquals("fd1", multiFake.sentFrames[1].device.id)
+        assertEquals("fd1", multiFake.sentFrames[2].device.id)
+        assertEquals("fd2", multiFake.sentFrames[3].device.id)
+        assertEquals("fd2", multiFake.sentFrames[4].device.id)
+        assertEquals("fd2", multiFake.sentFrames[5].device.id)
+
         fake.flashDevice(device)
         assertEquals(1, fake.flashedDevices.size)
         assertEquals(device, fake.flashedDevices[0])
@@ -367,5 +388,13 @@ class DefaultWledControllerClientTest {
         assertEquals(0, fake.powerState.size)
         assertEquals(0, fake.blackoutCalls)
         assertFalse(fake.isClosed)
+    }
+
+    @Test
+    fun suspendFunctions_runMainSafelyOffCallingThread() = runTest {
+        val dev = createDevice(id = "dev-main", totalLeds = 3)
+        client.blackoutFleet(listOf(dev), sendPowerOff = false)
+        client.flashDevice(dev, durationMs = 1L)
+        assertEquals(5, fakeUdpSender.sentFrames.size)
     }
 }

@@ -357,17 +357,7 @@ class MainActivity : AppCompatActivity(),
                 }
                 controllerClient.wakeAndSetBrightness(updatedDevice)
             } else {
-                val totalLeds = updatedDevice.totalLeds
-                if (totalLeds > 0) {
-                    val blackBuffer = ByteArray(totalLeds * 3)
-                    controllerClient.sendFrame(
-                        device = updatedDevice,
-                        rgb = blackBuffer,
-                        ledCount = totalLeds,
-
-                    )
-                }
-                controllerClient.turnOff(updatedDevice.ip)
+                controllerClient.blackoutFleet(listOf(updatedDevice), sendPowerOff = true)
                 withContext(Dispatchers.Main) {
                     updateDeviceDockDot(updatedDevice.id, false, null)
                     updateUiState()
@@ -502,19 +492,12 @@ class MainActivity : AppCompatActivity(),
             tvPreviewView.clearLiveColors()
         }
 
-        lifecycleScope.launch(Dispatchers.IO) {
-            for (dev in config.enabledDevices) {
-                val leds = dev.totalLeds
-                if (leds > 0) {
-                    val blackBuffer = ByteArray(leds * 3)
-                    controllerClient.sendFrame(
-                        device = dev,
-                        rgb = blackBuffer,
-                        ledCount = leds,
+        turnOffAllLeds()
+    }
 
-                    )
-                }
-            }
+    private fun turnOffAllLeds() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            controllerClient.blackoutFleet(config.enabledDevices, sendPowerOff = false)
         }
     }
 

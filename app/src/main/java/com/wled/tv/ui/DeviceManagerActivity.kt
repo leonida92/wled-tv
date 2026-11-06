@@ -210,7 +210,7 @@ class DeviceManagerActivity : AppCompatActivity() {
                             }
                             controllerClient.wakeAndSetBrightness(updatedDevice)
                         } else {
-                            controllerClient.turnOff(updatedDevice.ip)
+                            controllerClient.blackoutFleet(listOf(updatedDevice), sendPowerOff = true)
                         }
                     }
                 }
@@ -243,7 +243,7 @@ class DeviceManagerActivity : AppCompatActivity() {
                                 }
                                 renderDeviceList()
                                 lifecycleScope.launch(Dispatchers.IO) {
-                                    controllerClient.turnOff(device.ip)
+                                    controllerClient.blackoutFleet(listOf(device), sendPowerOff = true)
                                 }
                             }
                         }

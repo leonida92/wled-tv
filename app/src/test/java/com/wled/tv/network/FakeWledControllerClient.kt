@@ -95,11 +95,12 @@ class FakeWledControllerClient : WledControllerClient {
         synchronized(blackoutDevices) {
             blackoutDevices.add(devices)
         }
-        repeat(3) {
-            for (device in devices) {
-                val leds = device.totalLeds
-                if (leds > 0) {
-                    sendFrame(device, ByteArray(leds * 3), leds)
+        for (device in devices) {
+            val leds = device.totalLeds
+            if (leds > 0) {
+                val blackBuf = ByteArray(leds * 3)
+                repeat(3) {
+                    sendFrame(device, blackBuf, leds)
                 }
             }
         }
