@@ -1,3 +1,8 @@
+## Development & Testing
+
+- **Fast test loop:** Run `cmd /c "gradlew.bat testDebugUnitTest"` to execute JVM unit tests in ~8 seconds without emulators.
+- **Coding standards:** See `CODING_STANDARDS.md` for reactive state, non-blocking UI, and architectural rules enforced during review.
+
 ## Agent skills
 
 ### Issue tracker
@@ -10,4 +15,4 @@ Default canonical roles (`needs-triage`, `needs-info`, `ready-for-agent`, `ready
 
 ### Domain docs
 
-Single-context (`GLOSSARY.md` and `docs/adr/` at the repo root). See `docs/agents/domain.md`.
+Single-context (`GLOSSARY.md` and `docs/adr/` at the repo root). See `docs/agents/domain.md` and `docs/adr/0001-in-process-streaming-engine-and-reactive-config.md`.
