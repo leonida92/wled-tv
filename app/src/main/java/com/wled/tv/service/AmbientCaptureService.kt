@@ -27,7 +27,6 @@ import android.os.HandlerThread
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
-import android.os.SystemClock
 import android.provider.Settings
 import android.util.DisplayMetrics
 import android.util.Log
@@ -36,16 +35,12 @@ import android.view.WindowManager
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import com.wled.tv.R
-import com.wled.tv.data.PreferencesRepository
-import com.wled.tv.model.DeviceThroughputStats
-import com.wled.tv.model.DeviceType
+import com.wled.tv.data.ConfigRepository
+import com.wled.tv.engine.AmbientStreamingEngine
 import com.wled.tv.model.ThroughputHistoryPoint
 import com.wled.tv.model.ThroughputStats
 import com.wled.tv.model.WledConfig
-import com.wled.tv.model.WledDevice
 import com.wled.tv.network.WledHttpClient
-import com.wled.tv.network.WledUdpSender
-import com.wled.tv.processing.ScreenColorProcessor
 import com.wled.tv.ui.MainActivity
 import com.wled.tv.ui.views.DeviceOverlayData
 import com.wled.tv.ui.views.SamplingOverlayView
@@ -54,13 +49,22 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicBoolean
 
+/**
+ * Operating system adapter connecting Android hardware APIs (MediaProjection,
+ * VirtualDisplay, ImageReader, NotificationManager, Wake/Wifi locks) to the
+ * in-process [AmbientStreamingEngine].
+ */
 class AmbientCaptureService : Service() {
 
-    private lateinit var prefsRepo: PreferencesRepository
+    private lateinit var configRepo: ConfigRepository
     private var config: WledConfig = WledConfig()
+    private var engine: AmbientStreamingEngine? = null
 
     private var mediaProjection: MediaProjection? = null
     private var virtualDisplay: VirtualDisplay? = null
@@ -74,25 +78,12 @@ class AmbientCaptureService : Service() {
     private var connectivityManager: ConnectivityManager? = null
     private var audioManager: AudioManager? = null
 
-    private val colorProcessor = ScreenColorProcessor()
-    private val udpSender = WledUdpSender()
-    private val httpClient = WledHttpClient()
+    private val fallbackHttpClient = WledHttpClient()
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    private val rawTargetBuffers = HashMap<String, ByteArray>()
-    private val deviceBuffers = HashMap<String, ByteArray>()
-    private var isCapturing = AtomicBoolean(false)
-    private var isScreenOff = AtomicBoolean(false)
-    private var lastFrameTime = 0L
-    private var lastSendTime = 0L
-    private var lastLivePreviewTime = 0L
-    private var lastOverlayUpdateTime = 0L
-    private var lastOverlayTopCrop = -1f
-    private var lastOverlayLeftCrop = -1f
-    private var blackWithAudioStartTime = 0L
-    private var lastAudioCheckTime = 0L
-    private var cachedIsAudioPlaying = false
+    private val isCapturing = AtomicBoolean(false)
+    private val isScreenOff = AtomicBoolean(false)
     private var captureWidth = 320
     private var captureHeight = 180
 
@@ -103,68 +94,9 @@ class AmbientCaptureService : Service() {
     private val systemStatsCollector by lazy { SystemStatsCollector(applicationContext) }
     private var lastSystemStatsSampleTime = 0L
     private var latestSystemStatsString = ""
-    private var lastDrmKeepaliveTime = 0L
-
-    private var statsFramesInCurrentSecond = 0
-    private var statsPacketsInCurrentSecond = 0
-    private var statsTotalPackets = 0L
-    private val statsPerDevicePacketsInSecond = HashMap<String, Int>()
-    private val statsPerDeviceTotalPackets = HashMap<String, Long>()
-    private var lastStatsCalculationTime = 0L
-
-    private fun recordPacketSent(deviceId: String, count: Int = 1) {
-        statsPacketsInCurrentSecond += count
-        statsTotalPackets += count
-        statsPerDevicePacketsInSecond[deviceId] = (statsPerDevicePacketsInSecond[deviceId] ?: 0) + count
-        statsPerDeviceTotalPackets[deviceId] = (statsPerDeviceTotalPackets[deviceId] ?: 0L) + count.toLong()
-    }
-
-    private fun checkAndEmitThroughputStats(now: Long) {
-        if (lastStatsCalculationTime == 0L) {
-            lastStatsCalculationTime = now
-            return
-        }
-        val elapsed = now - lastStatsCalculationTime
-        if (elapsed >= 1000L) {
-            val actualFps = ((statsFramesInCurrentSecond * 1000L) / elapsed).toInt()
-            val actualPps = ((statsPacketsInCurrentSecond * 1000L) / elapsed).toInt()
-            val targetFps = config.calibration.fps.coerceIn(15, 60)
-
-            val deviceStatsList = config.enabledDevices.map { dev ->
-                val devPps = (((statsPerDevicePacketsInSecond[dev.id] ?: 0) * 1000L) / elapsed).toInt()
-                val devTotal = statsPerDeviceTotalPackets[dev.id] ?: 0L
-                DeviceThroughputStats(
-                    deviceId = dev.id,
-                    deviceName = dev.name,
-                    ip = dev.ip,
-                    pps = devPps,
-                    totalPackets = devTotal
-                )
-            }
-
-            val stats = ThroughputStats(
-                fps = actualFps,
-                targetFps = targetFps,
-                pps = actualPps,
-                totalPackets = statsTotalPackets,
-                deviceStats = deviceStatsList
-            )
-            latestStats = stats
-
-            recordHistoryPoint(ThroughputHistoryPoint(timestamp = now, fps = actualFps, pps = actualPps))
-
-            if (throughputListener != null) {
-                mainHandler.post {
-                    throughputListener?.onThroughputStatsUpdated(stats)
-                }
-            }
-
-            statsFramesInCurrentSecond = 0
-            statsPacketsInCurrentSecond = 0
-            statsPerDevicePacketsInSecond.clear()
-            lastStatsCalculationTime = now
-        }
-    }
+    private var lastOverlayUpdateTime = 0L
+    private var lastOverlayTopCrop = -1f
+    private var lastOverlayLeftCrop = -1f
 
     private val streamingTickerRunnable = object : Runnable {
         override fun run() {
@@ -178,93 +110,27 @@ class AmbientCaptureService : Service() {
                 return
             }
 
-            val targetFps = config.calibration.fps.coerceIn(15, 60)
-            val tickIntervalMs = (1000L / targetFps).coerceAtLeast(10L)
-            val startUptime = SystemClock.uptimeMillis()
-
-            if (!isTestingOverride) {
-                val now = System.currentTimeMillis()
-                val devices = config.enabledDevices
-                val shouldSendPreview = liveFrameListener != null && (now - lastLivePreviewTime >= 50L)
-
-                // Widevine L1 DRM Optimization:
-                // While DRM blackout is detected, skip flooding UDP at 60Hz. Send a keepalive black frame once every 1500ms.
-                val isDrmKeepaliveDue = isDrmActive && (now - lastDrmKeepaliveTime >= 1500L)
-                val skipDrmFrame = isDrmActive && !isDrmKeepaliveDue
-
-                if (!skipDrmFrame) {
-                    if (isDrmActive && isDrmKeepaliveDue) {
-                        lastDrmKeepaliveTime = now
-                    }
-
-                    for (device in devices) {
-                        val leds = device.totalLeds
-                        if (leds <= 0) continue
-
-                        val requiredSize = leds * 3
-                        val rawBuf = rawTargetBuffers[device.id] ?: continue
-                        if (rawBuf.size < requiredSize) continue
-
-                        var smoothBuf = deviceBuffers[device.id]
-                        if (smoothBuf == null || smoothBuf.size != requiredSize) {
-                            smoothBuf = ByteArray(requiredSize)
-                            deviceBuffers[device.id] = smoothBuf
-                        }
-
-                        // Step temporal smoothing filter towards target colors
-                        colorProcessor.applySmoothing(
-                            deviceId = device.id,
-                            rawRgb = rawBuf,
-                            ledCount = leds,
-                            smoothingFactor = device.calibration.smoothingFactor,
-                            outputRgb = smoothBuf
-                        )
-
-                        // Transmit smoothed frame to WLED via configured protocol (DDP / DRGB / WARLS)
-                        val packetsSent = udpSender.sendFrame(
-                            ip = device.ip,
-                            port = device.port,
-                            protocol = device.protocol,
-                            rgb = smoothBuf,
-                            ledCount = leds,
-                            colorOrder = device.calibration.colorOrder,
-                            isRgbw = device.calibration.isRgbw,
-                            rgbwMode = device.calibration.rgbwMode,
-                            timeoutSeconds = 5
-                        )
-                        if (packetsSent > 0) {
-                            recordPacketSent(device.id, packetsSent)
-                        }
-
-                        if (shouldSendPreview) {
-                            val previewCopy = smoothBuf.copyOf(leds * 3)
-                            liveFrameListener?.onDeviceFrameProcessed(device.id, previewCopy, leds)
-                        }
-                    }
-                    if (shouldSendPreview) {
-                        lastLivePreviewTime = now
-                    }
-                    lastSendTime = now
-                }
+            val currentEngine = engine
+            if (currentEngine == null) {
+                backgroundHandler?.postDelayed(this, 16L)
+                return
             }
 
-            val now = System.currentTimeMillis()
-            checkAndEmitThroughputStats(now)
+            val delayMs = currentEngine.tickStreaming()
 
+            val now = System.currentTimeMillis()
             if (isOverlayVisible && overlayView != null && now - lastSystemStatsSampleTime >= 1000L) {
                 lastSystemStatsSampleTime = now
                 latestSystemStatsString = systemStatsCollector.sample()
             }
 
-            val currentCrop = colorProcessor.currentTopCrop
-            val currentLeft = colorProcessor.currentLeftCrop
+            val currentCrop = currentEngine.colorProcessor.currentTopCrop
+            val currentLeft = currentEngine.colorProcessor.currentLeftCrop
             if (isOverlayVisible && overlayView != null && (currentCrop != lastOverlayTopCrop || currentLeft != lastOverlayLeftCrop || now - lastOverlayUpdateTime >= 250L)) {
                 lastOverlayUpdateTime = now
                 updateOverlayData()
             }
 
-            val elapsed = SystemClock.uptimeMillis() - startUptime
-            val delayMs = (tickIntervalMs - elapsed).coerceAtLeast(1L)
             backgroundHandler?.postDelayed(this, delayMs)
         }
     }
@@ -321,12 +187,18 @@ class AmbientCaptureService : Service() {
     override fun onCreate() {
         super.onCreate()
         currentServiceInstance = this
-        prefsRepo = PreferencesRepository(this)
-        config = prefsRepo.loadConfig()
+        configRepo = ConfigRepository.getInstance(applicationContext)
+        config = configRepo.currentConfig
         createNotificationChannel()
         startForegroundServiceWithNotification()
 
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+
+        serviceScope.launch {
+            configRepo.configFlow.collect { newConfig ->
+                handleConfigChanged(newConfig)
+            }
+        }
 
         try {
             powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -421,7 +293,7 @@ class AmbientCaptureService : Service() {
         }
 
         if (resultCode != 0 && resultData != null && !isCapturing.get()) {
-            config = prefsRepo.loadConfig()
+            config = configRepo.currentConfig
             startCapture(resultCode, resultData)
         }
 
@@ -446,25 +318,23 @@ class AmbientCaptureService : Service() {
     }
 
     fun reloadConfig() {
-        val runnable = Runnable {
-            val oldWidth = captureWidth
-            val oldHeight = captureHeight
-            config = prefsRepo.loadConfig()
-            colorProcessor.reset()
-            colorProcessor.isOverlayActive = isOverlayVisible
-            rawTargetBuffers.clear()
-            ensureWledAwake()
-            if (isCapturing.get() && (config.calibration.captureWidth != oldWidth || config.calibration.captureHeight != oldHeight)) {
-                reinitCaptureResolution(config.calibration.captureWidth, config.calibration.captureHeight)
-            }
-            Log.i(TAG, "Config reloaded: ${config.enabledDevices.size} enabled devices, Saturation=${config.calibration.saturation}, Resolution=${config.calibration.captureWidth}x${config.calibration.captureHeight}")
+        handleConfigChanged(configRepo.currentConfig)
+    }
+
+    private fun handleConfigChanged(newConfig: WledConfig) {
+        val oldWidth = captureWidth
+        val oldHeight = captureHeight
+        config = newConfig
+        engine?.updateConfig(newConfig)
+        ensureWledAwake()
+
+        val newWidth = newConfig.calibration.captureWidth
+        val newHeight = newConfig.calibration.captureHeight
+        if (isCapturing.get() && (newWidth != oldWidth || newHeight != oldHeight)) {
+            reinitCaptureResolution(newWidth, newHeight)
         }
-        val handler = backgroundHandler
-        if (handler != null && handler.looper.thread.isAlive) {
-            handler.post(runnable)
-        } else {
-            runnable.run()
-        }
+        updateNotification()
+        Log.i(TAG, "Config updated: ${newConfig.enabledDevices.size} enabled devices, Saturation=${newConfig.calibration.saturation}, Resolution=${newWidth}x${newHeight}")
     }
 
     private fun startCapture(resultCode: Int, resultData: Intent) {
@@ -481,7 +351,18 @@ class AmbientCaptureService : Service() {
         isRunning = true
         stateListener?.onStateChanged(true)
 
-        // Wake WLED controllers and set target brightness via HTTP
+        val newEngine = AmbientStreamingEngine(
+            initialConfig = config,
+            isAudioActive = { audioManager?.isMusicActive == true }
+        ).apply {
+            isTestingOverride = _isTestingOverride
+            liveFrameListener = AmbientCaptureService.liveFrameListener
+            throughputListener = AmbientCaptureService.throughputListener
+            colorProcessor.isOverlayActive = isOverlayVisible
+        }
+        engine = newEngine
+        _activeEngine.value = newEngine
+
         ensureWledAwake()
 
         mediaProjection?.registerCallback(object : MediaProjection.Callback() {
@@ -521,9 +402,6 @@ class AmbientCaptureService : Service() {
             imageReader = reader
             setupImageAvailableListener(reader)
 
-            colorProcessor.reset()
-            colorProcessor.isOverlayActive = isOverlayVisible
-
             virtualDisplay = mediaProjection?.createVirtualDisplay(
                 "WledAmbientDisplay",
                 captureWidth,
@@ -534,14 +412,6 @@ class AmbientCaptureService : Service() {
                 null,
                 backgroundHandler
             )
-
-            statsFramesInCurrentSecond = 0
-            statsPacketsInCurrentSecond = 0
-            statsTotalPackets = 0L
-            statsPerDevicePacketsInSecond.clear()
-            statsPerDeviceTotalPackets.clear()
-            lastStatsCalculationTime = System.currentTimeMillis()
-            latestStats = null
 
             // Start steady 60Hz streaming ticker
             backgroundHandler?.removeCallbacks(streamingTickerRunnable)
@@ -559,133 +429,31 @@ class AmbientCaptureService : Service() {
         reader.setOnImageAvailableListener({ r ->
             val image = r.acquireLatestImage() ?: return@setOnImageAvailableListener
 
-            if (!isCapturing.get()) {
-                image.close()
-                return@setOnImageAvailableListener
-            }
-
-            if (isScreenOff.get() || powerManager?.isInteractive == false) {
-                if (!isScreenOff.get()) {
-                    handleScreenOff()
-                }
-                image.close()
-                return@setOnImageAvailableListener
-            }
-
-            if (isTestingOverride) {
-                image.close()
-                return@setOnImageAvailableListener
-            }
-
-            // Cap video frame acquisition to at most the target FPS with a small 3ms jitter tolerance
-            val targetFps = config.calibration.fps.coerceIn(15, 60)
-            val minFrameInterval = (1000L / targetFps) - 3L
-            val now = System.currentTimeMillis()
-            if (now - lastFrameTime < minFrameInterval) {
-                image.close()
-                return@setOnImageAvailableListener
-            }
-            lastFrameTime = now
-            statsFramesInCurrentSecond++
-
             try {
-                val planes = image.planes
-                if (planes.isEmpty()) return@setOnImageAvailableListener
-                val plane = planes[0]
-                val buffer = plane.buffer ?: return@setOnImageAvailableListener
-
-                val width = image.width
-                val height = image.height
-                val rowStride = plane.rowStride
-                val pixelStride = plane.pixelStride
-
-                // Widevine L1 DRM Blackout Detection:
-                // When commercial streaming services (Netflix, Disney+, Prime) enforce hardware DRM,
-                // MediaProjection captures solid black while audio streams normally.
-                // 1. Check if frame is 100% black first (99.9% of video frames will return false immediately)
-                val isFrameBlack = colorProcessor.isFrameCompletelyBlack(buffer, width, height, rowStride, pixelStride)
-
-                if (isFrameBlack) {
-                    // Only perform audioManager Binder IPC if frame is black, throttled to 2 Hz (every 500ms)
-                    val isAudioPlaying = if (now - lastAudioCheckTime >= 500L) {
-                        lastAudioCheckTime = now
-                        val active = audioManager?.isMusicActive == true
-                        cachedIsAudioPlaying = active
-                        active
-                    } else {
-                        cachedIsAudioPlaying
+                if (!isCapturing.get() || isScreenOff.get() || powerManager?.isInteractive == false) {
+                    if (!isScreenOff.get() && powerManager?.isInteractive == false) {
+                        handleScreenOff()
                     }
-
-                    if (isAudioPlaying) {
-                        if (blackWithAudioStartTime == 0L) {
-                            blackWithAudioStartTime = now
-                        } else if (now - blackWithAudioStartTime >= 5000L) {
-                            if (!isDrmActive) {
-                                isDrmActive = true
-                                Log.w(TAG, "Widevine L1 DRM blackout detected (100% black frame for >5s with active audio)")
-                            }
-                        }
-                    } else {
-                        blackWithAudioStartTime = 0L
-                        if (isDrmActive) isDrmActive = false
-                    }
+                    return@setOnImageAvailableListener
                 }
 
-                if (!isFrameBlack) {
-                    blackWithAudioStartTime = 0L
-                    if (isDrmActive) {
-                        isDrmActive = false
-                        lastDrmKeepaliveTime = 0L
-                    }
-
-                    colorProcessor.isOverlayActive = isOverlayVisible
-                    val anyAutoLetterbox = config.enabledDevices.any { it.perimeter.autoLetterbox }
-                    if (anyAutoLetterbox) {
-                        colorProcessor.scanLetterbox(buffer, width, height, rowStride, pixelStride)
-                    }
-
-                    val devices = config.enabledDevices
-                    for (device in devices) {
-                        val leds = device.totalLeds
-                        if (leds <= 0) continue
-
-                        val requiredSize = leds * 3
-                        var rawBuf = rawTargetBuffers[device.id]
-                        if (rawBuf == null || rawBuf.size != requiredSize) {
-                            rawBuf = ByteArray(requiredSize)
-                            rawTargetBuffers[device.id] = rawBuf
-                        }
-
-                        colorProcessor.extractRawColors(
+                val planes = image.planes
+                if (planes.isNotEmpty()) {
+                    val plane = planes[0]
+                    val buffer = plane.buffer
+                    if (buffer != null) {
+                        engine?.onFrameAvailable(
                             buffer = buffer,
-                            width = width,
-                            height = height,
-                            rowStride = rowStride,
-                            pixelStride = pixelStride,
-                            device = device,
-                            calibration = device.calibration,
-                            outputRawRgb = rawBuf
+                            width = image.width,
+                            height = image.height,
+                            rowStride = plane.rowStride,
+                            pixelStride = plane.pixelStride
                         )
-                    }
-                } else {
-                    val devices = config.enabledDevices
-                    for (device in devices) {
-                        val leds = device.totalLeds
-                        if (leds <= 0) continue
-                        val requiredSize = leds * 3
-                        var rawBuf = rawTargetBuffers[device.id]
-                        if (rawBuf == null || rawBuf.size != requiredSize) {
-                            rawBuf = ByteArray(requiredSize)
-                            rawTargetBuffers[device.id] = rawBuf
-                        } else {
-                            rawBuf.fill(0)
-                        }
                     }
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error acquiring frame colors", e)
             } finally {
-                // Free the hardware graphic buffer IMMEDIATELY back to display server
                 image.close()
             }
         }, backgroundHandler)
@@ -733,7 +501,13 @@ class AmbientCaptureService : Service() {
                 }
             } catch (_: Exception) {}
             backgroundHandler?.removeCallbacks(streamingTickerRunnable)
-            blackoutAndPowerOffLeds(closeUdpWhenDone = false)
+            serviceScope.launch {
+                try {
+                    engine?.blackout(sendPowerOff = true)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error during blackout on screen off: ${e.message}")
+                }
+            }
         }
     }
 
@@ -746,61 +520,19 @@ class AmbientCaptureService : Service() {
                 }
             } catch (_: Exception) {}
             ensureWledAwake()
-            lastSendTime = 0L
-            lastFrameTime = 0L
             backgroundHandler?.removeCallbacks(streamingTickerRunnable)
             backgroundHandler?.post(streamingTickerRunnable)
         }
     }
 
-    private fun blackoutAndPowerOffLeds(closeUdpWhenDone: Boolean = false) {
-        val devices = config.enabledDevices
-        for (device in devices) {
-            deviceBuffers[device.id]?.fill(0)
-            rawTargetBuffers[device.id]?.fill(0)
-        }
-
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                for (device in devices) {
-                    val leds = device.totalLeds
-                    if (leds > 0) {
-                        val blackFrame = ByteArray(leds * 3)
-                        for (i in 0..2) {
-                            udpSender.sendFrame(
-                                ip = device.ip,
-                                port = device.port,
-                                protocol = device.protocol,
-                                rgb = blackFrame,
-                                ledCount = leds,
-                                colorOrder = device.calibration.colorOrder,
-                                isRgbw = device.calibration.isRgbw,
-                                rgbwMode = device.calibration.rgbwMode,
-                                timeoutSeconds = 1
-                            )
-                            delay(30L)
-                        }
-                    }
-                    httpClient.turnOff(device.ip)
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Error powering off WLED devices: ${e.message}")
-            } finally {
-                if (closeUdpWhenDone) {
-                    try {
-                        udpSender.close()
-                    } catch (_: Exception) {}
-                }
-            }
-        }
-    }
-
     private fun ensureWledAwake() {
+        val client = engine?.httpClient ?: fallbackHttpClient
+        val devices = (engine?.config ?: config).enabledDevices
         serviceScope.launch {
-            for (device in config.enabledDevices) {
+            for (device in devices) {
                 launch {
                     for (attempt in 1..3) {
-                        val success = httpClient.wakeAndSetBrightness(device.ip, device.calibration.maxBrightness)
+                        val success = client.wakeAndSetBrightness(device.ip, device.calibration.maxBrightness)
                         if (success) break
                         delay(1000L)
                     }
@@ -851,7 +583,7 @@ class AmbientCaptureService : Service() {
                 wm.addView(view, params)
                 overlayView = view
                 isOverlayVisible = true
-                colorProcessor.isOverlayActive = true
+                engine?.colorProcessor?.isOverlayActive = true
                 Log.i(TAG, "Sampling overlay attached to WindowManager")
                 backgroundHandler?.post {
                     lastSystemStatsSampleTime = System.currentTimeMillis()
@@ -876,7 +608,7 @@ class AmbientCaptureService : Service() {
             } finally {
                 overlayView = null
                 isOverlayVisible = false
-                colorProcessor.isOverlayActive = false
+                engine?.colorProcessor?.isOverlayActive = false
                 backgroundHandler?.post {
                     systemStatsCollector.reset()
                     lastSystemStatsSampleTime = 0L
@@ -898,13 +630,14 @@ class AmbientCaptureService : Service() {
 
     private fun updateOverlayData() {
         val view = overlayView ?: return
-        val devices = config.enabledDevices
+        val currentEngine = engine ?: return
+        val devices = currentEngine.config.enabledDevices
         val overlayList = ArrayList<DeviceOverlayData>(devices.size)
         for (device in devices) {
             val leds = device.totalLeds
-            val buf = deviceBuffers[device.id]
+            val buf = currentEngine.getDeviceBuffer(device.id)
             if (leds > 0 && buf != null) {
-                val zones = colorProcessor.getActiveZones(device)
+                val zones = currentEngine.colorProcessor.getActiveZones(device)
                 val rgbCopy = buf.copyOf(leds * 3)
                 overlayList.add(
                     DeviceOverlayData(
@@ -917,19 +650,19 @@ class AmbientCaptureService : Service() {
                 )
             }
         }
-        val fps = latestStats?.fps?.toFloat() ?: statsFramesInCurrentSecond.toFloat()
-        val pps = latestStats?.pps ?: statsPacketsInCurrentSecond
-        lastOverlayTopCrop = colorProcessor.currentTopCrop
-        lastOverlayLeftCrop = colorProcessor.currentLeftCrop
+        val fps = currentEngine.latestStats?.fps?.toFloat() ?: 0f
+        val pps = currentEngine.latestStats?.pps ?: 0
+        lastOverlayTopCrop = currentEngine.colorProcessor.currentTopCrop
+        lastOverlayLeftCrop = currentEngine.colorProcessor.currentLeftCrop
         view.updateTelemetry(
             devices = overlayList,
-            currentTopCrop = colorProcessor.currentTopCrop,
-            currentBottomCrop = colorProcessor.currentBottomCrop,
-            currentLeftCrop = colorProcessor.currentLeftCrop,
-            currentRightCrop = colorProcessor.currentRightCrop,
+            currentTopCrop = currentEngine.colorProcessor.currentTopCrop,
+            currentBottomCrop = currentEngine.colorProcessor.currentBottomCrop,
+            currentLeftCrop = currentEngine.colorProcessor.currentLeftCrop,
+            currentRightCrop = currentEngine.colorProcessor.currentRightCrop,
             fps = fps,
             pps = pps,
-            isDrmActive = isDrmActive,
+            isDrmActive = currentEngine.isDrmActive,
             systemStats = latestSystemStatsString
         )
     }
@@ -939,12 +672,6 @@ class AmbientCaptureService : Service() {
 
         hideSamplingOverlay()
         isRunning = false
-        isDrmActive = false
-        colorProcessor.isOverlayActive = false
-        blackWithAudioStartTime = 0L
-        lastAudioCheckTime = 0L
-        cachedIsAudioPlaying = false
-        lastSystemStatsSampleTime = 0L
         latestSystemStatsString = ""
         systemStatsCollector.reset()
         stateListener?.onStateChanged(false)
@@ -982,12 +709,20 @@ class AmbientCaptureService : Service() {
             Log.e(TAG, "Error stopping MediaProjection", e)
         }
 
-        blackoutAndPowerOffLeds(closeUdpWhenDone = true)
-        statsFramesInCurrentSecond = 0
-        statsPacketsInCurrentSecond = 0
-        statsPerDevicePacketsInSecond.clear()
-        latestStats = null
-        rawTargetBuffers.clear()
+        val currentEngine = engine
+        engine = null
+        _activeEngine.value = null
+
+        serviceScope.launch {
+            try {
+                currentEngine?.blackout(sendPowerOff = true)
+            } catch (e: Exception) {
+                Log.w(TAG, "Error during engine blackout on stop", e)
+            } finally {
+                currentEngine?.close()
+            }
+        }
+
         Log.i(TAG, "Ambient screen capture stopped")
     }
 
@@ -1022,9 +757,10 @@ class AmbientCaptureService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        val deviceCount = config.enabledDevices.size
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("WLED TV Ambient Active")
-            .setContentText("Streaming ambient bias lighting to ${config.enabledDevices.size} lights")
+            .setContentText("Streaming ambient bias lighting to $deviceCount lights")
             .setSmallIcon(R.drawable.ic_tv)
             .setContentIntent(pendingIntent)
             .addAction(R.drawable.ic_crop, "Overlay", toggleOverlayPendingIntent)
@@ -1032,6 +768,15 @@ class AmbientCaptureService : Service() {
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
+    }
+
+    private fun updateNotification() {
+        try {
+            val manager = getSystemService(NotificationManager::class.java)
+            manager?.notify(NOTIFICATION_ID, createNotification())
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to update notification", e)
+        }
     }
 
     private fun createNotificationChannel() {
@@ -1077,8 +822,6 @@ class AmbientCaptureService : Service() {
         hideSamplingOverlay()
         if (isCapturing.get()) {
             stopCapture()
-        } else {
-            blackoutAndPowerOffLeds(closeUdpWhenDone = true)
         }
         try {
             serviceScope.cancel()
@@ -1091,16 +834,16 @@ class AmbientCaptureService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    interface LiveFrameListener {
-        fun onDeviceFrameProcessed(deviceId: String, rgb: ByteArray, count: Int)
+    fun interface LiveFrameListener : AmbientStreamingEngine.LiveFrameListener {
+        override fun onDeviceFrameProcessed(deviceId: String, rgb: ByteArray, count: Int)
     }
 
-    interface ServiceStateListener {
+    fun interface ServiceStateListener {
         fun onStateChanged(running: Boolean)
     }
 
-    interface ThroughputListener {
-        fun onThroughputStatsUpdated(stats: ThroughputStats)
+    fun interface ThroughputListener : AmbientStreamingEngine.ThroughputListener {
+        override fun onThroughputStatsUpdated(stats: ThroughputStats)
     }
 
     companion object {
@@ -1116,44 +859,58 @@ class AmbientCaptureService : Service() {
         @Volatile
         var isRunning: Boolean = false
 
-        @Volatile
-        var isDrmActive: Boolean = false
+        private val _activeEngine = MutableStateFlow<AmbientStreamingEngine?>(null)
+        val activeEngine: StateFlow<AmbientStreamingEngine?> = _activeEngine.asStateFlow()
 
-        @Volatile
-        var isTestingOverride: Boolean = false
-
-        var currentServiceInstance: AmbientCaptureService? = null
-        var liveFrameListener: LiveFrameListener? = null
-        var stateListener: ServiceStateListener? = null
-        var throughputListener: ThroughputListener? = null
-
-        @Volatile
-        var latestStats: ThroughputStats? = null
-
-        private const val MAX_HISTORY_SECONDS = 10800
-        private val historyLock = Any()
-        private val historyBuffer = ArrayDeque<ThroughputHistoryPoint>(MAX_HISTORY_SECONDS)
-
-        fun recordHistoryPoint(point: ThroughputHistoryPoint) {
-            synchronized(historyLock) {
-                if (historyBuffer.size >= MAX_HISTORY_SECONDS) {
-                    historyBuffer.removeFirst()
-                }
-                historyBuffer.addLast(point)
-            }
+        @androidx.annotation.VisibleForTesting
+        internal fun setActiveEngineForTesting(engine: AmbientStreamingEngine?) {
+            _activeEngine.value = engine
         }
 
-        fun getHistorySnapshot(windowSeconds: Int = MAX_HISTORY_SECONDS): List<ThroughputHistoryPoint> {
-            val cutoff = System.currentTimeMillis() - (windowSeconds * 1000L)
-            return synchronized(historyLock) {
-                historyBuffer.filter { it.timestamp >= cutoff }
+        @Volatile
+        private var _isTestingOverride: Boolean = false
+
+        var isTestingOverride: Boolean
+            get() = _activeEngine.value?.isTestingOverride ?: _isTestingOverride
+            set(value) {
+                _isTestingOverride = value
+                _activeEngine.value?.isTestingOverride = value
             }
+
+        var isDrmActive: Boolean
+            get() = _activeEngine.value?.isDrmActive ?: false
+            set(_) {}
+
+        var latestStats: ThroughputStats?
+            get() = _activeEngine.value?.latestStats
+            set(_) {}
+
+        var currentServiceInstance: AmbientCaptureService? = null
+
+        var liveFrameListener: LiveFrameListener? = null
+            set(value) {
+                field = value
+                _activeEngine.value?.liveFrameListener = value
+            }
+
+        var stateListener: ServiceStateListener? = null
+
+        var throughputListener: ThroughputListener? = null
+            set(value) {
+                field = value
+                _activeEngine.value?.throughputListener = value
+            }
+
+        fun recordHistoryPoint(point: ThroughputHistoryPoint) {
+            _activeEngine.value?.recordHistoryPoint(point)
+        }
+
+        fun getHistorySnapshot(windowSeconds: Int = 10800): List<ThroughputHistoryPoint> {
+            return _activeEngine.value?.getHistorySnapshot(windowSeconds) ?: emptyList()
         }
 
         fun clearHistory() {
-            synchronized(historyLock) {
-                historyBuffer.clear()
-            }
+            _activeEngine.value?.clearHistory()
         }
     }
 }

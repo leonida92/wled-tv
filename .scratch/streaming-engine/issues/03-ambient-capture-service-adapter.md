@@ -4,11 +4,11 @@
 
 **Blocked by:** 01: Reactive ConfigRepository, 02: In-Process AmbientStreamingEngine & Clock Abstraction
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `AmbientCaptureService` shrinks to a focused adapter (~150-200 lines) stripped of buffer management, DRM state machines, and telemetry calculations.
-- [ ] The service collects `ConfigRepository.configFlow` and forwards new configuration snapshots synchronously to `engine.updateConfig(config)`.
-- [ ] Hardware frames from `ImageReader` are forwarded directly to `engine.onFrameAvailable(...)`.
-- [ ] The background handler executes a steady ticker runnable that calls `engine.tickStreaming(...)` at the configured frame rate.
-- [ ] System standby, daydreaming, and screen-off broadcasts trigger `engine.blackout()`.
-- [ ] The service exposes `val activeEngine: StateFlow<AmbientStreamingEngine?>`, setting the instance when capture starts and clearing it to `null` on stop.
+- [x] `AmbientCaptureService` shrinks to a focused adapter (~150-200 lines) stripped of buffer management, DRM state machines, and telemetry calculations.
+- [x] The service collects `ConfigRepository.configFlow` and forwards new configuration snapshots synchronously to `engine.updateConfig(config)`.
+- [x] Hardware frames from `ImageReader` are forwarded directly to `engine.onFrameAvailable(...)`.
+- [x] The background handler executes a steady ticker runnable that calls `engine.tickStreaming(...)` at the configured frame rate.
+- [x] System standby, daydreaming, and screen-off broadcasts trigger `engine.blackout()`.
+- [x] The service exposes `val activeEngine: StateFlow<AmbientStreamingEngine?>`, setting the instance when capture starts and clearing it to `null` on stop.
