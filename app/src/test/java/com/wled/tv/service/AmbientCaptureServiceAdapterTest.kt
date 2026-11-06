@@ -4,10 +4,15 @@ import com.wled.tv.engine.AmbientStreamingEngine
 import com.wled.tv.model.ColorCalibration
 import com.wled.tv.model.WledConfig
 import com.wled.tv.model.WledDevice
+import com.wled.tv.network.DefaultWledControllerClient
+import com.wled.tv.network.FakeWledControllerClient
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -34,7 +39,8 @@ class AmbientCaptureServiceAdapterTest {
 
     @Test
     fun activeEngineFlow_whenEngineActive_exposesInstanceAndCleanState() {
-        val engine = AmbientStreamingEngine(initialConfig = WledConfig())
+        val fakeClient = FakeWledControllerClient()
+        val engine = AmbientStreamingEngine(initialConfig = WledConfig(), controllerClient = fakeClient)
         try {
             AmbientCaptureService.setActiveEngineForTesting(engine)
             assertEquals(engine, AmbientCaptureService.activeEngine.value)
@@ -113,5 +119,66 @@ class AmbientCaptureServiceAdapterTest {
         // Device Count changed: should trigger
         val countChange = baseConfig.copy(devices = listOf(dev1, dev2))
         assertTrue("Device count change must register as fleet change", service.fleetParametersChanged(baseConfig, countChange))
+    }
+
+    @Test
+    fun wakeFixtures_withEngineActive_delegatesToEngineControllerClient() = runBlocking {
+        val service = AmbientCaptureService()
+        val fakeClient = FakeWledControllerClient()
+        val dev = WledDevice(id = "dev1", name = "TV", ip = "192.168.1.10", port = 21324, enabled = true)
+        val config = WledConfig(devices = listOf(dev))
+        val engine = AmbientStreamingEngine(initialConfig = config, controllerClient = fakeClient)
+        service.engine = engine
+
+        service.wakeFixtures()
+        var count = 0
+        while (fakeClient.powerState["192.168.1.10"] != true && count++ < 50) {
+            delay(20)
+        }
+        assertEquals(true, fakeClient.powerState["192.168.1.10"])
+    }
+
+    @Test
+    fun wakeFixtures_withoutEngine_delegatesToFallbackControllerClient() = runBlocking {
+        val service = AmbientCaptureService()
+        val fakeClient = FakeWledControllerClient()
+        service.fallbackControllerClient = fakeClient
+        val dev = WledDevice(id = "dev2", name = "Bar", ip = "192.168.1.20", port = 21324, enabled = true)
+        service.config = WledConfig(devices = listOf(dev))
+        service.engine = null
+
+        service.wakeFixtures()
+        var count = 0
+        while (fakeClient.powerState["192.168.1.20"] != true && count++ < 50) {
+            delay(20)
+        }
+        assertEquals(true, fakeClient.powerState["192.168.1.20"])
+    }
+
+    @Test
+    fun fallbackControllerClient_blackoutFleet_zeroesFramesAndTurnsOff() = runBlocking {
+        val service = AmbientCaptureService()
+        val fakeClient = FakeWledControllerClient()
+        service.fallbackControllerClient = fakeClient
+        val dev = WledDevice(id = "dev1", name = "TV", ip = "192.168.1.10", port = 21324, enabled = true, ledCount = 10)
+        service.config = WledConfig(devices = listOf(dev))
+        service.engine = null
+
+        service.fallbackControllerClient.blackoutFleet(service.config.enabledDevices, sendPowerOff = true)
+        assertEquals(1, fakeClient.blackoutCalls)
+        assertEquals(3, fakeClient.sentFrames.size)
+        assertEquals(false, fakeClient.powerState["192.168.1.10"])
+    }
+
+    @Test
+    fun defaultWledControllerClient_testSeam_allowsInjectingFakeClient() {
+        val fakeClient = FakeWledControllerClient()
+        DefaultWledControllerClient.setInstanceForTesting(fakeClient)
+        try {
+            val resolved = DefaultWledControllerClient.getInstance()
+            assertSame(fakeClient, resolved)
+        } finally {
+            DefaultWledControllerClient.setInstanceForTesting(null)
+        }
     }
 }
