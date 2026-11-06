@@ -4,10 +4,10 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** completed
 
-- [ ] `ConfigRepository` exposes `val configFlow: StateFlow<WledConfig>` emitting immutable configuration snapshots.
-- [ ] `ConfigRepository` exposes `val currentConfig: WledConfig` for synchronous immediate reads.
-- [ ] `ConfigRepository` provides `suspend fun updateConfig(transform: (WledConfig) -> WledConfig)` that atomically mutates in-memory state and triggers disk persistence in the background.
-- [ ] Initial configuration loading correctly migrates existing JSON device definitions and legacy flat preference keys.
-- [ ] Comprehensive JVM unit tests verify loading, legacy migration, atomic mutations, and concurrent subscriber notifications without Android framework dependencies.
+- [x] `ConfigRepository` exposes `val configFlow: StateFlow<WledConfig>` emitting immutable configuration snapshots.
+- [x] `ConfigRepository` exposes `val currentConfig: WledConfig` for synchronous immediate reads.
+- [x] `ConfigRepository` provides `suspend fun updateConfig(transform: (WledConfig) -> WledConfig)` that atomically mutates in-memory state and triggers disk persistence in the background.
+- [x] Initial configuration loading correctly migrates existing JSON device definitions and legacy flat preference keys.
+- [x] Comprehensive JVM unit tests verify loading, legacy migration, atomic mutations, and concurrent subscriber notifications without Android framework dependencies.
