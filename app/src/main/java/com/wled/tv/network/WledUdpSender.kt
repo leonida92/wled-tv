@@ -9,7 +9,7 @@ import java.net.InetAddress
 import java.net.SocketException
 import java.util.concurrent.ConcurrentHashMap
 
-class WledUdpSender {
+open class WledUdpSender {
 
     @Volatile
     private var socket: DatagramSocket? = null
@@ -46,7 +46,7 @@ class WledUdpSender {
      * Universal frame dispatcher by protocol.
      * Returns the number of UDP datagrams successfully sent (0 on failure).
      */
-    fun sendFrame(
+    open fun sendFrame(
         ip: String,
         port: Int,
         protocol: StreamingProtocol,
@@ -482,7 +482,7 @@ class WledUdpSender {
     }
 
     @Synchronized
-    fun close() {
+    open fun close() {
         try {
             socket?.close()
         } catch (_: Exception) {}

@@ -4,14 +4,14 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] A thin `Clock` interface is introduced with a production system implementation and a deterministic `TestClock`.
-- [ ] `AmbientStreamingEngine` exposes `onFrameAvailable(...)` for video buffer intake and `tickStreaming(nowMs: Long)` for transmission cadence.
-- [ ] Pre-allocated color byte buffers (`rawTargetBuffers` and `deviceBuffers`) are managed internally and resized only when fixture LED counts change, guaranteeing zero GC allocations in the streaming loop.
-- [ ] Widevine L1 DRM blackout detection state machine triggers after 5 seconds of continuous 100% black frames with active audio, decoupling the audio check via an injected query function.
-- [ ] Transmission rate throttles to 1500ms keepalive frames during DRM blackout, and recovers immediately when non-black video frames resume.
-- [ ] Suspending `blackout(sendPowerOff: Boolean)` routine transmits zeroed frame bursts and resets smoothing filter states cleanly.
-- [ ] An explicit `isTestingOverride` flag suppresses video frame extraction and ticker transmissions during external diagnostic tests.
-- [ ] The 3-hour throughput history ring buffer and per-second FPS/packet rate calculators are encapsulated within the engine.
-- [ ] Comprehensive JVM unit tests verify 60Hz pacing, zero allocations, DRM detection/recovery, blackout sequencing, and throughput metrics using `TestClock`.
+- [x] A thin `Clock` interface is introduced with a production system implementation and a deterministic `TestClock`.
+- [x] `AmbientStreamingEngine` exposes `onFrameAvailable(...)` for video buffer intake and `tickStreaming(nowMs: Long)` for transmission cadence.
+- [x] Pre-allocated color byte buffers (`rawTargetBuffers` and `deviceBuffers`) are managed internally and resized only when fixture LED counts change, guaranteeing zero GC allocations in the streaming loop.
+- [x] Widevine L1 DRM blackout detection state machine triggers after 5 seconds of continuous 100% black frames with active audio, decoupling the audio check via an injected query function.
+- [x] Transmission rate throttles to 1500ms keepalive frames during DRM blackout, and recovers immediately when non-black video frames resume.
+- [x] Suspending `blackout(sendPowerOff: Boolean)` routine transmits zeroed frame bursts and resets smoothing filter states cleanly.
+- [x] An explicit `isTestingOverride` flag suppresses video frame extraction and ticker transmissions during external diagnostic tests.
+- [x] The 3-hour throughput history ring buffer and per-second FPS/packet rate calculators are encapsulated within the engine.
+- [x] Comprehensive JVM unit tests verify 60Hz pacing, zero allocations, DRM detection/recovery, blackout sequencing, and throughput metrics using `TestClock`.
