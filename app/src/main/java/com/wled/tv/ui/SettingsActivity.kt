@@ -31,7 +31,6 @@ class SettingsActivity : AppCompatActivity() {
         }
 
     private lateinit var tvSettingsTotalBadge: TextView
-    private lateinit var cardCornerWizard: View
 
     private lateinit var itemTopLeds: LinearLayout
     private lateinit var tvTopLedsValue: TextView
@@ -68,7 +67,6 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun bindViews() {
         tvSettingsTotalBadge = findViewById(R.id.tvSettingsTotalBadge)
-        cardCornerWizard = findViewById(R.id.cardCornerWizard)
 
         itemTopLeds = findViewById(R.id.itemTopLeds)
         tvTopLedsValue = findViewById(R.id.tvTopLedsValue)
@@ -84,17 +82,10 @@ class SettingsActivity : AppCompatActivity() {
         itemDirection = findViewById(R.id.itemDirection)
         tvDirectionValue = findViewById(R.id.tvDirectionValue)
 
-        cardCornerWizard.requestFocus()
+        itemTopLeds.requestFocus()
     }
 
     private fun setupListeners() {
-        cardCornerWizard.setOnClickListener {
-            val intent = Intent(this, CornerFinderActivity::class.java).apply {
-                putExtra(CornerFinderActivity.EXTRA_DEVICE_ID, targetDevice.id)
-            }
-            startActivity(intent)
-        }
-
         setupLedCountStepper(itemTopLeds, onAdjust = { delta ->
             updateTargetPerimeter { p ->
                 val newCount = (p.topLeds + delta).coerceIn(0, 300)

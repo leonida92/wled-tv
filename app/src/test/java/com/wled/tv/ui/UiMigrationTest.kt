@@ -176,12 +176,6 @@ class UiMigrationTest {
         val calibControllerField = CalibrationActivity::class.java.getDeclaredField("controllerClient")
         assertTrue(WledControllerClient::class.java.isAssignableFrom(calibControllerField.type))
 
-        // CornerFinderActivity: must use controllerClient and have no raw udpSender field
-        val cornerFields = CornerFinderActivity::class.java.declaredFields.map { it.name }
-        assertFalse("CornerFinderActivity must not declare udpSender", cornerFields.contains("udpSender"))
-        assertTrue("CornerFinderActivity must declare controllerClient", cornerFields.contains("controllerClient"))
-        val cornerControllerField = CornerFinderActivity::class.java.getDeclaredField("controllerClient")
-        assertTrue(WledControllerClient::class.java.isAssignableFrom(cornerControllerField.type))
     }
 
     @Test
@@ -197,9 +191,6 @@ class UiMigrationTest {
             val calibField = CalibrationActivity::class.java.getDeclaredField("controllerClient").apply { isAccessible = true }
             assertSame(fakeClient, calibField.get(calibActivity))
 
-            val cornerActivity = CornerFinderActivity()
-            val cornerField = CornerFinderActivity::class.java.getDeclaredField("controllerClient").apply { isAccessible = true }
-            assertSame(fakeClient, cornerField.get(cornerActivity))
         } finally {
             DefaultWledControllerClient.setInstanceForTesting(null)
         }

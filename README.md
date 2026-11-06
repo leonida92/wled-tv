@@ -62,8 +62,6 @@ It captures on-screen video in real time, extracts rich chroma-weighted edge and
 - **Floating Diagnostic HUD & Sampling Zone Visualizer**:
   - Optional real-time on-screen wireframe overlay displaying active LED sampling boxes, live color dots, letterbox crop percentages, and stream FPS/PPS.
   - One-click toggle directly from notification action drawer or broadcast intent.
-- **Physical Corner Finder Mapping Tool**:
-  - Interactive on-screen visualizer to map physical strip corners (Top-Left, Top-Right, Bottom-Right, Bottom-Left) and automatically calculate segment counts, starting corner, and clockwise/counter-clockwise wiring.
 - **Widevine L1 DRM Blackout Protection**:
   - Automatically detects protected hardware video surfaces (100% black frame with active audio) and safely pauses unnecessary network transmissions.
 - **Ultra-Low Latency and Zero-Allocation Hot Path**:

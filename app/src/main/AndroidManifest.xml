@@ -56,12 +56,6 @@
             android:exported="false"
             android:screenOrientation="landscape" />
 
-        <!-- Interactive Physical Corner Alignment Wizard -->
-        <activity
-            android:name=".ui.CornerFinderActivity"
-            android:exported="false"
-            android:screenOrientation="landscape" />
-
         <!-- Light Setup & Multi-Device Manager -->
         <activity
             android:name=".ui.DeviceManagerActivity"
