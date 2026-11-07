@@ -88,15 +88,21 @@ It captures on-screen video in real time, extracts rich chroma-weighted edge and
 
 ## Installation and Sideloading
 
-### Method 1: ADB (Fastest)
+### Method 1: ADB (Fastest Installation & Updates)
 
 1. On your Google TV / Android TV:
    - Enable **Developer Options**: *Settings -> System -> About -> click 'Android TV OS build' 7 times*.
    - Enable **Network Debugging**: *Settings -> System -> Developer options -> Network debugging*.
-2. Connect from your computer:
+2. Connect and install or update an existing installation from your computer:
    ```bash
+   # Connect to TV over local network
    adb connect <TV_IP_ADDRESS>:5555
-   adb install -r <path_to_downloaded_release_apk>
+
+   # Install or update (-r keeps data, -d allows version changes)
+   adb install -r -d app/build/outputs/apk/release/wled-tv-v<version>-release.apk
+
+   # Verify running version on TV
+   adb shell dumpsys package com.wled.tv | grep versionName
    ```
 
 ### Method 2: Sideload via USB or "Send Files to TV"
