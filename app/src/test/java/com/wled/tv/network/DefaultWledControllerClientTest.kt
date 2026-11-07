@@ -5,22 +5,17 @@ import com.wled.tv.model.DeviceType
 import com.wled.tv.model.PerimeterConfig
 import com.wled.tv.model.StreamingProtocol
 import com.wled.tv.model.WledDevice
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNotSame
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicInteger
 
 class DefaultWledControllerClientTest {
 
@@ -34,18 +29,21 @@ class DefaultWledControllerClientTest {
 
         data class SentFrame(
             val device: WledDevice,
-            val rgb: ByteArray,
+            val wirePayload: ByteArray,
             val ledCount: Int,
             val timeoutSeconds: Byte
-        )
+        ) {
+            val rgb: ByteArray
+                get() = wirePayload
+        }
 
         override fun sendDeviceFrame(
             device: WledDevice,
-            rgb: ByteArray,
+            wirePayload: ByteArray,
             ledCount: Int,
             timeoutSeconds: Byte
         ): Int {
-            sentFrames.add(SentFrame(device, rgb.copyOf(), ledCount, timeoutSeconds))
+            sentFrames.add(SentFrame(device, wirePayload.copyOf(), ledCount, timeoutSeconds))
             return 1
         }
 
@@ -97,7 +95,8 @@ class DefaultWledControllerClientTest {
         port: Int = 4048,
         protocol: StreamingProtocol = StreamingProtocol.DDP,
         totalLeds: Int = 10,
-        maxBrightness: Int = 200
+        maxBrightness: Int = 200,
+        isRgbw: Boolean = false
     ): WledDevice {
         return WledDevice(
             id = id,
@@ -107,7 +106,7 @@ class DefaultWledControllerClientTest {
             protocol = protocol,
             type = DeviceType.PERIMETER,
             perimeter = PerimeterConfig(topLeds = totalLeds, rightLeds = 0, bottomLeds = 0, leftLeds = 0),
-            calibration = ColorCalibration(maxBrightness = maxBrightness)
+            calibration = ColorCalibration(maxBrightness = maxBrightness, isRgbw = isRgbw)
         )
     }
 
@@ -129,15 +128,15 @@ class DefaultWledControllerClientTest {
     @Test
     fun sendFrame_delegatesDirectlyToUdpSender() {
         val device = createDevice(totalLeds = 12)
-        val rgb = ByteArray(36) { it.toByte() }
+        val wirePayload = ByteArray(36) { it.toByte() }
 
-        val packetsSent = client.sendFrame(device, rgb, 12)
+        val packetsSent = client.sendFrame(device, wirePayload, 12)
 
         assertEquals(1, packetsSent)
         assertEquals(1, fakeUdpSender.sentFrames.size)
         val frame = fakeUdpSender.sentFrames[0]
         assertEquals(device, frame.device)
-        assertArrayEquals(rgb, frame.rgb)
+        assertArrayEquals(wirePayload, frame.wirePayload)
         assertEquals(12, frame.ledCount)
     }
 
@@ -200,41 +199,56 @@ class DefaultWledControllerClientTest {
     }
 
     @Test
-    fun blackoutFleet_sendsThreeZeroedBurstsPerDevice() = runTest {
-        val dev1 = createDevice(id = "dev1", ip = "192.168.1.51", totalLeds = 4)
-        val dev2 = createDevice(id = "dev2", ip = "192.168.1.52", totalLeds = 6)
-        val devices = listOf(dev1, dev2)
+    fun blackoutFleet_sendsThreeZeroedBurstsPerDevice_withChannelWidthAwarePayloads() = runTest {
+        val dev1Rgb = createDevice(id = "dev1", ip = "192.168.1.51", totalLeds = 4, isRgbw = false)
+        val dev2Rgb = createDevice(id = "dev2", ip = "192.168.1.52", totalLeds = 6, isRgbw = false)
+        val dev3Rgbw = createDevice(id = "dev3", ip = "192.168.1.53", totalLeds = 5, isRgbw = true)
+        val devices = listOf(dev1Rgb, dev2Rgb, dev3Rgbw)
 
         client.blackoutFleet(devices, sendPowerOff = false)
 
-        // 3 bursts * 2 devices = 6 frames
-        assertEquals(6, fakeUdpSender.sentFrames.size)
+        // 3 bursts * 3 devices = 9 frames
+        assertEquals(9, fakeUdpSender.sentFrames.size)
 
         val dev1Frames = fakeUdpSender.sentFrames.filter { it.device.id == "dev1" }
         val dev2Frames = fakeUdpSender.sentFrames.filter { it.device.id == "dev2" }
+        val dev3Frames = fakeUdpSender.sentFrames.filter { it.device.id == "dev3" }
 
         assertEquals(3, dev1Frames.size)
         assertEquals(3, dev2Frames.size)
+        assertEquals(3, dev3Frames.size)
 
+        // RGB: 4 LEDs * 3 channels = 12 bytes
         for (frame in dev1Frames) {
-            assertEquals(12, frame.rgb.size)
-            assertTrue(frame.rgb.all { it == 0.toByte() })
+            assertEquals(12, frame.wirePayload.size)
+            assertTrue(frame.wirePayload.all { it == 0.toByte() })
             assertEquals(4, frame.ledCount)
         }
 
+        // RGB: 6 LEDs * 3 channels = 18 bytes
         for (frame in dev2Frames) {
-            assertEquals(18, frame.rgb.size)
-            assertTrue(frame.rgb.all { it == 0.toByte() })
+            assertEquals(18, frame.wirePayload.size)
+            assertTrue(frame.wirePayload.all { it == 0.toByte() })
             assertEquals(6, frame.ledCount)
         }
 
-        // Sequential bursts: dev1, dev1, dev1, then dev2, dev2, dev2
+        // RGBW: 5 LEDs * 4 channels = 20 bytes
+        for (frame in dev3Frames) {
+            assertEquals(20, frame.wirePayload.size)
+            assertTrue(frame.wirePayload.all { it == 0.toByte() })
+            assertEquals(5, frame.ledCount)
+        }
+
+        // Sequential bursts grouping: dev1, dev1, dev1, dev2, dev2, dev2, dev3, dev3, dev3
         assertEquals("dev1", fakeUdpSender.sentFrames[0].device.id)
         assertEquals("dev1", fakeUdpSender.sentFrames[1].device.id)
         assertEquals("dev1", fakeUdpSender.sentFrames[2].device.id)
         assertEquals("dev2", fakeUdpSender.sentFrames[3].device.id)
         assertEquals("dev2", fakeUdpSender.sentFrames[4].device.id)
         assertEquals("dev2", fakeUdpSender.sentFrames[5].device.id)
+        assertEquals("dev3", fakeUdpSender.sentFrames[6].device.id)
+        assertEquals("dev3", fakeUdpSender.sentFrames[7].device.id)
+        assertEquals("dev3", fakeUdpSender.sentFrames[8].device.id)
 
         // sendPowerOff = false should not invoke turnOff
         assertTrue(fakeHttpClient.turnOffCalls.isEmpty())
@@ -283,8 +297,8 @@ class DefaultWledControllerClientTest {
     }
 
     @Test
-    fun flashDevice_sendsFullWhiteThenFullBlackFrames() = runTest {
-        val device = createDevice(totalLeds = 5)
+    fun flashDevice_rgbDevice_sendsFullWhiteThenFullBlackFrames() = runTest {
+        val device = createDevice(totalLeds = 5, isRgbw = false)
 
         client.flashDevice(device, durationMs = 10L)
 
@@ -292,14 +306,36 @@ class DefaultWledControllerClientTest {
 
         val whiteFrame = fakeUdpSender.sentFrames[0]
         assertEquals(device, whiteFrame.device)
-        assertEquals(15, whiteFrame.rgb.size)
-        assertTrue(whiteFrame.rgb.all { it == 255.toByte() })
+        assertEquals(15, whiteFrame.wirePayload.size)
+        assertTrue(whiteFrame.wirePayload.all { it == 255.toByte() })
         assertEquals(5, whiteFrame.ledCount)
 
         val blackFrame = fakeUdpSender.sentFrames[1]
         assertEquals(device, blackFrame.device)
-        assertEquals(15, blackFrame.rgb.size)
-        assertTrue(blackFrame.rgb.all { it == 0.toByte() })
+        assertEquals(15, blackFrame.wirePayload.size)
+        assertTrue(blackFrame.wirePayload.all { it == 0.toByte() })
+        assertEquals(5, blackFrame.ledCount)
+    }
+
+    @Test
+    fun flashDevice_rgbwDevice_sendsFourChannelWhiteThenBlackFrames() = runTest {
+        val device = createDevice(totalLeds = 5, isRgbw = true)
+
+        client.flashDevice(device, durationMs = 10L)
+
+        assertEquals(2, fakeUdpSender.sentFrames.size)
+
+        val whiteFrame = fakeUdpSender.sentFrames[0]
+        assertEquals(device, whiteFrame.device)
+        // 5 LEDs * 4 channels = 20 bytes
+        assertEquals(20, whiteFrame.wirePayload.size)
+        assertTrue(whiteFrame.wirePayload.all { it == 255.toByte() })
+        assertEquals(5, whiteFrame.ledCount)
+
+        val blackFrame = fakeUdpSender.sentFrames[1]
+        assertEquals(device, blackFrame.device)
+        assertEquals(20, blackFrame.wirePayload.size)
+        assertTrue(blackFrame.wirePayload.all { it == 0.toByte() })
         assertEquals(5, blackFrame.ledCount)
     }
 
@@ -338,12 +374,12 @@ class DefaultWledControllerClientTest {
     fun fakeWledControllerClient_recordsOperationsCorrectly() = runTest {
         val fake = FakeWledControllerClient()
         val device = createDevice(ip = "192.168.1.90", totalLeds = 3)
-        val rgb = byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8, 9)
+        val wirePayload = byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8, 9)
 
-        fake.sendFrame(device, rgb, 3)
+        fake.sendFrame(device, wirePayload, 3)
         assertEquals(1, fake.sentFrames.size)
         assertEquals(device, fake.sentFrames[0].device)
-        assertArrayEquals(rgb, fake.sentFrames[0].rgb)
+        assertArrayEquals(wirePayload, fake.sentFrames[0].wirePayload)
         assertEquals(3, fake.sentFrames[0].ledCount)
 
         fake.wakeAndSetBrightness(device)
@@ -388,6 +424,28 @@ class DefaultWledControllerClientTest {
         assertEquals(0, fake.powerState.size)
         assertEquals(0, fake.blackoutCalls)
         assertFalse(fake.isClosed)
+    }
+
+    @Test
+    fun fakeWledControllerClient_rgbwFlashAndBlackout_sizesPayloadsProperly() = runTest {
+        val fake = FakeWledControllerClient()
+        val rgbwDevice = createDevice(id = "rgbw-dev", totalLeds = 4, isRgbw = true)
+
+        fake.flashDevice(rgbwDevice)
+        assertEquals(2, fake.sentFrames.size)
+        val whiteFrame = fake.sentFrames[0]
+        val blackFrame = fake.sentFrames[1]
+
+        assertEquals(16, whiteFrame.wirePayload.size)
+        assertTrue(whiteFrame.wirePayload.all { it == 255.toByte() })
+        assertEquals(16, blackFrame.wirePayload.size)
+        assertTrue(blackFrame.wirePayload.all { it == 0.toByte() })
+
+        fake.blackoutFleet(listOf(rgbwDevice), sendPowerOff = false)
+        assertEquals(5, fake.sentFrames.size)
+        val blackoutFrame = fake.sentFrames[2]
+        assertEquals(16, blackoutFrame.wirePayload.size)
+        assertTrue(blackoutFrame.wirePayload.all { it == 0.toByte() })
     }
 
     @Test

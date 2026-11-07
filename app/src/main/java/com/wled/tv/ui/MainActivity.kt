@@ -461,7 +461,7 @@ class MainActivity : AppCompatActivity(),
 
                     controllerClient.sendFrame(
                         device = dev,
-                        rgb = testBuffer,
+                        wirePayload = testBuffer,
                         ledCount = leds,
 
                     )

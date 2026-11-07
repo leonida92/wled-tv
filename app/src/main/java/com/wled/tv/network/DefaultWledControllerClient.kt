@@ -22,8 +22,8 @@ class DefaultWledControllerClient internal constructor(
     private val httpClient: WledHttpClient = WledHttpClient()
 ) : WledControllerClient {
 
-    override fun sendFrame(device: WledDevice, rgb: ByteArray, ledCount: Int): Int {
-        return udpSender.sendDeviceFrame(device, rgb, ledCount)
+    override fun sendFrame(device: WledDevice, wirePayload: ByteArray, ledCount: Int): Int {
+        return udpSender.sendDeviceFrame(device, wirePayload, ledCount)
     }
 
     override suspend fun wakeAndSetBrightness(device: WledDevice): Boolean {
@@ -51,7 +51,8 @@ class DefaultWledControllerClient internal constructor(
         for (device in devices) {
             val leds = device.totalLeds
             if (leds > 0) {
-                val blackBuf = ByteArray(leds * 3)
+                val bytesPerLed = if (device.calibration.isRgbw) 4 else 3
+                val blackBuf = ByteArray(leds * bytesPerLed)
                 repeat(3) {
                     sendFrame(device, blackBuf, leds)
                 }
@@ -84,8 +85,10 @@ class DefaultWledControllerClient internal constructor(
         val leds = device.totalLeds
         if (leds <= 0) return@withContext
 
-        val whiteFrame = ByteArray(leds * 3) { 255.toByte() }
-        val blackFrame = ByteArray(leds * 3)
+        val bytesPerLed = if (device.calibration.isRgbw) 4 else 3
+        val frameSize = leds * bytesPerLed
+        val whiteFrame = ByteArray(frameSize) { 255.toByte() }
+        val blackFrame = ByteArray(frameSize)
 
         sendFrame(device, whiteFrame, leds)
         delay(durationMs)
