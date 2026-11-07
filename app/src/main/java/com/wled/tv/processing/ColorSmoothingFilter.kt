@@ -2,7 +2,7 @@ package com.wled.tv.processing
 
 import kotlin.math.sqrt
 
-class ColorSmoothingFilter {
+internal class ColorSmoothingFilter {
 
     private var smoothedRgb = FloatArray(0)
 

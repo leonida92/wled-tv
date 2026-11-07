@@ -14,7 +14,7 @@ import kotlin.math.roundToInt
 
 class ScreenColorProcessor {
 
-    private val smoothingFilters = HashMap<String, ColorSmoothingFilter>()
+    private val smoothingFilters = HashMap<String, SmoothingFilter>()
     private var rawRgbBuffer = ByteArray(0)
 
     // Dynamic Letterbox Auto-Detection state
@@ -257,8 +257,28 @@ class ScreenColorProcessor {
         smoothingFactor: Float,
         outputRgb: ByteArray
     ) {
-        val filter = smoothingFilters.getOrPut(deviceId) { ColorSmoothingFilter() }
+        val filter = smoothingFilters.getOrPut(deviceId) { SmoothingFilter() }
         filter.apply(rawRgb, ledCount, smoothingFactor, outputRgb)
+    }
+
+    fun reset(deviceId: String) {
+        smoothingFilters.remove(deviceId)
+    }
+
+    /**
+     * Encodes canonical RGB pixel buffer into physical LED wire protocol format for a specific WLED device.
+     * Performs channel order permutation and SK6812 RGBW white gamut extraction with zero GC allocations.
+     * Returns total bytes written into outputWire.
+     */
+    fun encodeWireFrame(device: WledDevice, sourceRgb: ByteArray, outputWire: ByteArray): Int {
+        return encodeWireFrame(
+            sourceRgb = sourceRgb,
+            ledCount = device.totalLeds,
+            colorOrder = device.calibration.colorOrder,
+            isRgbw = device.calibration.isRgbw,
+            rgbwMode = device.calibration.rgbwMode,
+            outputWire = outputWire
+        )
     }
 
     private fun rect(l: Float, t: Float, r: Float, b: Float): RectF = RectF(l, t, r, b).apply {
@@ -862,5 +882,241 @@ class ScreenColorProcessor {
         if (cachedLuts.size > 8) cachedLuts.clear()
         cachedLuts[calibration] = lut
         return lut
+    }
+
+    private class SmoothingFilter {
+        private var smoothedRgb = FloatArray(0)
+
+        fun reset() {
+            smoothedRgb = FloatArray(0)
+        }
+
+        fun apply(
+            rawRgb: ByteArray,
+            ledCount: Int,
+            factor: Float,
+            output: ByteArray
+        ) {
+            val totalBytes = ledCount * 3
+            if (totalBytes <= 0) return
+
+            if (smoothedRgb.size != totalBytes) {
+                smoothedRgb = FloatArray(totalBytes)
+                for (i in 0 until totalBytes) {
+                    smoothedRgb[i] = (rawRgb[i].toInt() and 0xFF).toFloat()
+                }
+            }
+
+            var sumSquaredDist = 0.0
+            for (i in 0 until ledCount) {
+                val idx = i * 3
+                val rTarget = (rawRgb[idx].toInt() and 0xFF).toFloat()
+                val gTarget = (rawRgb[idx + 1].toInt() and 0xFF).toFloat()
+                val bTarget = (rawRgb[idx + 2].toInt() and 0xFF).toFloat()
+
+                val rDiff = rTarget - smoothedRgb[idx]
+                val gDiff = gTarget - smoothedRgb[idx + 1]
+                val bDiff = bTarget - smoothedRgb[idx + 2]
+
+                sumSquaredDist += (rDiff * rDiff + gDiff * gDiff + bDiff * bDiff)
+            }
+
+            val avgDistance = kotlin.math.sqrt(sumSquaredDist / ledCount)
+
+            val baseAlpha = factor.coerceIn(0.05f, 1.0f)
+            val alpha = when {
+                baseAlpha >= 0.90f -> baseAlpha
+                avgDistance >= 60.0 -> 0.90f
+                avgDistance >= 30.0 -> {
+                    val t = ((avgDistance - 30.0) / 30.0).toFloat()
+                    baseAlpha + t * (0.90f - baseAlpha)
+                }
+                else -> baseAlpha
+            }
+
+            val oneMinusAlpha = 1.0f - alpha
+
+            for (i in 0 until totalBytes) {
+                val target = (rawRgb[i].toInt() and 0xFF).toFloat()
+                smoothedRgb[i] = (smoothedRgb[i] * oneMinusAlpha) + (target * alpha)
+                output[i] = (smoothedRgb[i] + 0.5f).toInt().coerceIn(0, 255).toByte()
+            }
+        }
+    }
+
+    companion object {
+        const val ORDER_RGB = 0
+        const val ORDER_GRB = 1
+        const val ORDER_BGR = 2
+        const val ORDER_BRG = 3
+        const val ORDER_RBG = 4
+        const val ORDER_GBR = 5
+
+        const val RGBW_MODE_AUTO_SUBTRACT = "AUTO_SUBTRACT"
+        const val RGBW_MODE_AUTO_ADD = "AUTO_ADD"
+        const val RGBW_MODE_OFF = "OFF"
+
+        private const val MODE_INT_AUTO_SUBTRACT = 0
+        private const val MODE_INT_AUTO_ADD = 1
+        private const val MODE_INT_OFF = 2
+
+        fun parseColorOrder(colorOrder: String?): Int {
+            if (colorOrder == null) return ORDER_RGB
+            var start = 0
+            while (start < colorOrder.length && colorOrder[start].isWhitespace()) {
+                start++
+            }
+            if (colorOrder.length - start < 3) return ORDER_RGB
+            val c0 = colorOrder[start].uppercaseChar()
+            val c1 = colorOrder[start + 1].uppercaseChar()
+            val c2 = colorOrder[start + 2].uppercaseChar()
+            return when {
+                c0 == 'R' && c1 == 'G' && c2 == 'B' -> ORDER_RGB
+                c0 == 'G' && c1 == 'R' && c2 == 'B' -> ORDER_GRB
+                c0 == 'B' && c1 == 'G' && c2 == 'R' -> ORDER_BGR
+                c0 == 'B' && c1 == 'R' && c2 == 'G' -> ORDER_BRG
+                c0 == 'R' && c1 == 'B' && c2 == 'G' -> ORDER_RBG
+                c0 == 'G' && c1 == 'B' && c2 == 'R' -> ORDER_GBR
+                else -> ORDER_RGB
+            }
+        }
+
+        private fun parseRgbwMode(mode: String?): Int {
+            if (mode == null) return MODE_INT_AUTO_SUBTRACT
+            return when {
+                mode.equals(RGBW_MODE_AUTO_SUBTRACT, ignoreCase = true) -> MODE_INT_AUTO_SUBTRACT
+                mode.equals(RGBW_MODE_AUTO_ADD, ignoreCase = true) -> MODE_INT_AUTO_ADD
+                mode.equals(RGBW_MODE_OFF, ignoreCase = true) -> MODE_INT_OFF
+                else -> MODE_INT_AUTO_SUBTRACT
+            }
+        }
+
+        fun encodeWireFrame(
+            sourceRgb: ByteArray,
+            ledCount: Int,
+            colorOrder: String,
+            isRgbw: Boolean,
+            rgbwMode: String,
+            outputWire: ByteArray
+        ): Int {
+            if (ledCount <= 0) return 0
+            val requiredSourceBytes = ledCount * 3
+            if (sourceRgb.size < requiredSourceBytes) return 0
+            val bytesPerLed = if (isRgbw) 4 else 3
+            val requiredWireBytes = ledCount * bytesPerLed
+            if (outputWire.size < requiredWireBytes) return 0
+
+            val order = parseColorOrder(colorOrder)
+
+            if (!isRgbw) {
+                if (order == ORDER_RGB) {
+                    System.arraycopy(sourceRgb, 0, outputWire, 0, requiredWireBytes)
+                } else {
+                    var dst = 0
+                    for (i in 0 until ledCount) {
+                        val src = i * 3
+                        val r = sourceRgb[src]
+                        val g = sourceRgb[src + 1]
+                        val b = sourceRgb[src + 2]
+                        when (order) {
+                            ORDER_GRB -> {
+                                outputWire[dst++] = g
+                                outputWire[dst++] = r
+                                outputWire[dst++] = b
+                            }
+                            ORDER_BGR -> {
+                                outputWire[dst++] = b
+                                outputWire[dst++] = g
+                                outputWire[dst++] = r
+                            }
+                            ORDER_BRG -> {
+                                outputWire[dst++] = b
+                                outputWire[dst++] = r
+                                outputWire[dst++] = g
+                            }
+                            ORDER_RBG -> {
+                                outputWire[dst++] = r
+                                outputWire[dst++] = b
+                                outputWire[dst++] = g
+                            }
+                            ORDER_GBR -> {
+                                outputWire[dst++] = g
+                                outputWire[dst++] = b
+                                outputWire[dst++] = r
+                            }
+                            else -> {
+                                outputWire[dst++] = r
+                                outputWire[dst++] = g
+                                outputWire[dst++] = b
+                            }
+                        }
+                    }
+                }
+            } else {
+                val parsedMode = parseRgbwMode(rgbwMode)
+                var dst = 0
+                for (i in 0 until ledCount) {
+                    val src = i * 3
+                    val rInt = sourceRgb[src].toInt() and 0xFF
+                    val gInt = sourceRgb[src + 1].toInt() and 0xFF
+                    val bInt = sourceRgb[src + 2].toInt() and 0xFF
+
+                    val wInt = when (parsedMode) {
+                        MODE_INT_AUTO_SUBTRACT, MODE_INT_AUTO_ADD -> minOf(rInt, minOf(gInt, bInt))
+                        else -> 0
+                    }
+
+                    val rOut = if (parsedMode == MODE_INT_AUTO_SUBTRACT) rInt - wInt else rInt
+                    val gOut = if (parsedMode == MODE_INT_AUTO_SUBTRACT) gInt - wInt else gInt
+                    val bOut = if (parsedMode == MODE_INT_AUTO_SUBTRACT) bInt - wInt else bInt
+
+                    val rByte = rOut.toByte()
+                    val gByte = gOut.toByte()
+                    val bByte = bOut.toByte()
+                    val wByte = wInt.toByte()
+
+                    when (order) {
+                        ORDER_GRB -> {
+                            outputWire[dst++] = gByte
+                            outputWire[dst++] = rByte
+                            outputWire[dst++] = bByte
+                            outputWire[dst++] = wByte
+                        }
+                        ORDER_BGR -> {
+                            outputWire[dst++] = bByte
+                            outputWire[dst++] = gByte
+                            outputWire[dst++] = rByte
+                            outputWire[dst++] = wByte
+                        }
+                        ORDER_BRG -> {
+                            outputWire[dst++] = bByte
+                            outputWire[dst++] = rByte
+                            outputWire[dst++] = gByte
+                            outputWire[dst++] = wByte
+                        }
+                        ORDER_RBG -> {
+                            outputWire[dst++] = rByte
+                            outputWire[dst++] = bByte
+                            outputWire[dst++] = gByte
+                            outputWire[dst++] = wByte
+                        }
+                        ORDER_GBR -> {
+                            outputWire[dst++] = gByte
+                            outputWire[dst++] = bByte
+                            outputWire[dst++] = rByte
+                            outputWire[dst++] = wByte
+                        }
+                        else -> { // ORDER_RGB
+                            outputWire[dst++] = rByte
+                            outputWire[dst++] = gByte
+                            outputWire[dst++] = bByte
+                            outputWire[dst++] = wByte
+                        }
+                    }
+                }
+            }
+
+            return requiredWireBytes
+        }
     }
 }
