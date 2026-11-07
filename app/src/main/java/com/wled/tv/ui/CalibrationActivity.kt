@@ -277,7 +277,7 @@ class CalibrationActivity : AppCompatActivity() {
 
                 controllerClient.sendFrame(
                     device = dev,
-                    rgb = frame,
+                    wirePayload = frame,
                     ledCount = leds,
 
                 )
