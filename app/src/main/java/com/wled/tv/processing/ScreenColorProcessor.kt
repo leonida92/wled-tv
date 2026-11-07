@@ -5,6 +5,7 @@ import android.media.Image
 import com.wled.tv.model.ColorCalibration
 import com.wled.tv.model.DeviceType
 import com.wled.tv.model.PerimeterConfig
+import com.wled.tv.model.StreamingProtocol
 import com.wled.tv.model.WledDevice
 import java.nio.ByteBuffer
 import kotlin.math.max
@@ -275,7 +276,7 @@ class ScreenColorProcessor {
             sourceRgb = sourceRgb,
             ledCount = device.totalLeds,
             colorOrder = device.calibration.colorOrder,
-            isRgbw = device.calibration.isRgbw,
+            isRgbw = (device.calibration.isRgbw && device.protocol == StreamingProtocol.DDP),
             rgbwMode = device.calibration.rgbwMode,
             outputWire = outputWire
         )
@@ -1000,7 +1001,7 @@ class ScreenColorProcessor {
                 sourceRgb = sourceRgb,
                 ledCount = device.totalLeds,
                 colorOrder = device.calibration.colorOrder,
-                isRgbw = device.calibration.isRgbw,
+                isRgbw = (device.calibration.isRgbw && device.protocol == StreamingProtocol.DDP),
                 rgbwMode = device.calibration.rgbwMode,
                 outputWire = outputWire
             )

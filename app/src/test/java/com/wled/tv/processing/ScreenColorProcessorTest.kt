@@ -2,6 +2,7 @@ package com.wled.tv.processing
 
 import com.wled.tv.model.ColorCalibration
 import com.wled.tv.model.DeviceType
+import com.wled.tv.model.StreamingProtocol
 import com.wled.tv.model.WledDevice
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -587,6 +588,34 @@ class ScreenColorProcessorTest {
         assertEquals(8, writtenDev)
         assertEquals(8, writtenComp)
         assertArrayEquals(outCompanion, outDevice)
+    }
+
+    @Test
+    fun encodeWireFrame_deviceOverload_respectsProtocolSafety() {
+        val processor = ScreenColorProcessor()
+        val drgbDevice = WledDevice(
+            id = "test_drgb",
+            type = DeviceType.LEFT_AMBIENT,
+            protocol = StreamingProtocol.DRGB,
+            ledCount = 1,
+            calibration = ColorCalibration(isRgbw = true, colorOrder = "RGB")
+        )
+        val ddpDevice = WledDevice(
+            id = "test_ddp",
+            type = DeviceType.LEFT_AMBIENT,
+            protocol = StreamingProtocol.DDP,
+            ledCount = 1,
+            calibration = ColorCalibration(isRgbw = true, colorOrder = "RGB")
+        )
+        val source = byteArrayOf(255.toByte(), 255.toByte(), 255.toByte())
+        val outDrgb = ByteArray(3)
+        val outDdp = ByteArray(4)
+
+        val writtenDrgb = processor.encodeWireFrame(drgbDevice, source, outDrgb)
+        val writtenDdp = processor.encodeWireFrame(ddpDevice, source, outDdp)
+
+        assertEquals(3, writtenDrgb)
+        assertEquals(4, writtenDdp)
     }
 
     @Test

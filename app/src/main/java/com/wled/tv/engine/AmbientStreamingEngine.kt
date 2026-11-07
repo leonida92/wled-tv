@@ -95,9 +95,9 @@ class AmbientStreamingEngine(
     internal val deviceBuffers = HashMap<String, ByteArray>()
     internal val wireBuffers = HashMap<String, ByteArray>()
 
-    fun getRawBuffer(deviceId: String): ByteArray? = rawTargetBuffers[deviceId]
-    fun getDeviceBuffer(deviceId: String): ByteArray? = deviceBuffers[deviceId]
-    fun getWireBuffer(deviceId: String): ByteArray? = wireBuffers[deviceId]
+    internal fun getRawBuffer(deviceId: String): ByteArray? = rawTargetBuffers[deviceId]
+    internal fun getDeviceBuffer(deviceId: String): ByteArray? = deviceBuffers[deviceId]
+    internal fun getWireBuffer(deviceId: String): ByteArray? = wireBuffers[deviceId]
 
     /**
      * Extracts an immutable snapshot of a device's active sampling zones and smoothed color buffer
@@ -186,7 +186,7 @@ class AmbientStreamingEngine(
                     deviceBuffers[dev.id] = ByteArray(reqSize)
                 }
             }
-            val wireReqSize = dev.totalLeds * (if (dev.calibration.isRgbw) 4 else 3)
+            val wireReqSize = dev.totalLeds * dev.wireBytesPerLed
             if (wireReqSize > 0) {
                 val curWire = wireBuffers[dev.id]
                 if (curWire == null || curWire.size != wireReqSize) {
@@ -345,7 +345,7 @@ class AmbientStreamingEngine(
                         outputRgb = smoothBuf
                     )
 
-                    val wireReqSize = leds * (if (device.calibration.isRgbw) 4 else 3)
+                    val wireReqSize = leds * device.wireBytesPerLed
                     var wireBuf = wireBuffers[device.id]
                     if (wireBuf == null || wireBuf.size != wireReqSize) {
                         wireBuf = ByteArray(wireReqSize)
