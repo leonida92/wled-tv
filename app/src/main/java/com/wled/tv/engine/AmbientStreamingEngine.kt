@@ -93,9 +93,11 @@ class AmbientStreamingEngine(
 
     internal val rawTargetBuffers = HashMap<String, ByteArray>()
     internal val deviceBuffers = HashMap<String, ByteArray>()
+    internal val wireBuffers = HashMap<String, ByteArray>()
 
-    fun getRawBuffer(deviceId: String): ByteArray? = rawTargetBuffers[deviceId]
-    fun getDeviceBuffer(deviceId: String): ByteArray? = deviceBuffers[deviceId]
+    internal fun getRawBuffer(deviceId: String): ByteArray? = rawTargetBuffers[deviceId]
+    internal fun getDeviceBuffer(deviceId: String): ByteArray? = deviceBuffers[deviceId]
+    internal fun getWireBuffer(deviceId: String): ByteArray? = wireBuffers[deviceId]
 
     /**
      * Extracts an immutable snapshot of a device's active sampling zones and smoothed color buffer
@@ -170,6 +172,7 @@ class AmbientStreamingEngine(
         val enabledIds = newConfig.enabledDevices.map { it.id }.toSet()
         rawTargetBuffers.keys.retainAll(enabledIds)
         deviceBuffers.keys.retainAll(enabledIds)
+        wireBuffers.keys.retainAll(enabledIds)
 
         for (dev in newConfig.enabledDevices) {
             val reqSize = dev.totalLeds * 3
@@ -181,6 +184,13 @@ class AmbientStreamingEngine(
                 val curSmooth = deviceBuffers[dev.id]
                 if (curSmooth == null || curSmooth.size != reqSize) {
                     deviceBuffers[dev.id] = ByteArray(reqSize)
+                }
+            }
+            val wireReqSize = dev.totalLeds * dev.wireBytesPerLed
+            if (wireReqSize > 0) {
+                val curWire = wireBuffers[dev.id]
+                if (curWire == null || curWire.size != wireReqSize) {
+                    wireBuffers[dev.id] = ByteArray(wireReqSize)
                 }
             }
         }
@@ -335,8 +345,22 @@ class AmbientStreamingEngine(
                         outputRgb = smoothBuf
                     )
 
-                    // Transmit smoothed frame to WLED via configured protocol (DDP / DRGB / WARLS)
-                    val packetsSent = controllerClient.sendFrame(device, smoothBuf, leds)
+                    val wireReqSize = leds * device.wireBytesPerLed
+                    var wireBuf = wireBuffers[device.id]
+                    if (wireBuf == null || wireBuf.size != wireReqSize) {
+                        wireBuf = ByteArray(wireReqSize)
+                        wireBuffers[device.id] = wireBuf
+                    }
+
+                    // Step 2: Encode wire frame into hardware channel order and RGBW format
+                    colorProcessor.encodeWireFrame(
+                        device = device,
+                        sourceRgb = smoothBuf,
+                        outputWire = wireBuf
+                    )
+
+                    // Step 3: Transmit wire bytes to WLED via configured protocol (DDP / DRGB / WARLS)
+                    val packetsSent = controllerClient.sendFrame(device, wireBuf, leds)
                     if (packetsSent > 0) {
                         recordPacketSent(device.id, packetsSent)
                     }
@@ -464,6 +488,7 @@ class AmbientStreamingEngine(
         for (device in devices) {
             deviceBuffers[device.id]?.fill(0)
             rawTargetBuffers[device.id]?.fill(0)
+            wireBuffers[device.id]?.fill(0)
         }
         colorProcessor.reset()
 

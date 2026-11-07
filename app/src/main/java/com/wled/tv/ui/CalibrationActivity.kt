@@ -21,6 +21,7 @@ import com.wled.tv.model.WledConfig
 import com.wled.tv.model.WledDevice
 import com.wled.tv.network.DefaultWledControllerClient
 import com.wled.tv.network.WledControllerClient
+import com.wled.tv.processing.ScreenColorProcessor
 import com.wled.tv.service.AmbientCaptureService
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -255,19 +256,22 @@ class CalibrationActivity : AppCompatActivity() {
         AmbientCaptureService.activeEngine.value?.isTestingOverride = true
 
         testColorJob = lifecycleScope.launch(Dispatchers.IO) {
+            val dev = targetDevice
+            val leds = dev.totalLeds
+            if (leds <= 0) return@launch
+            val frame = ByteArray(leds * 3)
+            val wireBuffer = ByteArray(leds * dev.wireBytesPerLed)
+
             while (isActive && activeTestColor != null) {
-                val dev = targetDevice
-                val leds = dev.totalLeds
-                if (leds <= 0) break
+                val currentDev = targetDevice
                 val color = activeTestColor ?: break
-                val c = dev.calibration
+                val c = currentDev.calibration
                 val briScale = c.maxBrightness / 255f
 
                 val r = (color.first * c.gainR * briScale).roundToInt().coerceIn(0, 255).toByte()
                 val g = (color.second * c.gainG * briScale).roundToInt().coerceIn(0, 255).toByte()
                 val b = (color.third * c.gainB * briScale).roundToInt().coerceIn(0, 255).toByte()
 
-                val frame = ByteArray(leds * 3)
                 for (i in 0 until leds) {
                     val idx = i * 3
                     frame[idx] = r
@@ -275,11 +279,12 @@ class CalibrationActivity : AppCompatActivity() {
                     frame[idx + 2] = b
                 }
 
-                controllerClient.sendFrame(
-                    device = dev,
-                    rgb = frame,
-                    ledCount = leds,
+                ScreenColorProcessor.encodeWireFrame(currentDev, frame, wireBuffer)
 
+                controllerClient.sendFrame(
+                    device = currentDev,
+                    wirePayload = wireBuffer,
+                    ledCount = leds
                 )
                 delay(100)
             }

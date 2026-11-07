@@ -29,6 +29,9 @@ data class WledDevice(
     val colorOrder: String
         get() = calibration.colorOrder
 
+    val wireBytesPerLed: Int
+        get() = if (calibration.isRgbw && protocol == StreamingProtocol.DDP) 4 else 3
+
     val totalLeds: Int
         get() = when (type) {
             DeviceType.PERIMETER -> perimeter.totalLeds

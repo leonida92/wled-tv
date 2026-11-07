@@ -12,20 +12,23 @@ class FakeWledControllerClient : WledControllerClient {
 
     data class SentFrameRecord(
         val device: WledDevice,
-        val rgb: ByteArray,
+        val wirePayload: ByteArray,
         val ledCount: Int
     ) {
+        val rgb: ByteArray
+            get() = wirePayload
+
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
             if (javaClass != other?.javaClass) return false
             other as SentFrameRecord
-            return device == other.device && ledCount == other.ledCount && rgb.contentEquals(other.rgb)
+            return device == other.device && ledCount == other.ledCount && wirePayload.contentEquals(other.wirePayload)
         }
 
         override fun hashCode(): Int {
             var result = device.hashCode()
             result = 31 * result + ledCount
-            result = 31 * result + rgb.contentHashCode()
+            result = 31 * result + wirePayload.contentHashCode()
             return result
         }
     }
@@ -52,15 +55,15 @@ class FakeWledControllerClient : WledControllerClient {
 
     var simulateFlashDelay = false
 
-    override fun sendFrame(device: WledDevice, rgb: ByteArray, ledCount: Int): Int {
+    override fun sendFrame(device: WledDevice, wirePayload: ByteArray, ledCount: Int): Int {
         synchronized(_sentFrames) {
-            _sentFrames.add(SentFrameRecord(device, rgb.copyOf(), ledCount))
+            _sentFrames.add(SentFrameRecord(device, wirePayload.copyOf(), ledCount))
         }
         return 1
     }
 
-    fun sendFrame(device: WledDevice, rgb: ByteArray): Int {
-        return sendFrame(device, rgb, device.totalLeds)
+    fun sendFrame(device: WledDevice, wirePayload: ByteArray): Int {
+        return sendFrame(device, wirePayload, device.totalLeds)
     }
 
     override suspend fun wakeAndSetBrightness(device: WledDevice): Boolean {
@@ -98,7 +101,7 @@ class FakeWledControllerClient : WledControllerClient {
         for (device in devices) {
             val leds = device.totalLeds
             if (leds > 0) {
-                val blackBuf = ByteArray(leds * 3)
+                val blackBuf = ByteArray(leds * device.wireBytesPerLed)
                 repeat(3) {
                     sendFrame(device, blackBuf, leds)
                 }
@@ -121,8 +124,9 @@ class FakeWledControllerClient : WledControllerClient {
         }
         val leds = device.totalLeds
         if (leds > 0) {
-            val white = ByteArray(leds * 3) { 255.toByte() }
-            val black = ByteArray(leds * 3)
+            val frameSize = leds * device.wireBytesPerLed
+            val white = ByteArray(frameSize) { 255.toByte() }
+            val black = ByteArray(frameSize)
             sendFrame(device, white, leds)
             if (simulateFlashDelay && durationMs > 0) {
                 delay(durationMs)

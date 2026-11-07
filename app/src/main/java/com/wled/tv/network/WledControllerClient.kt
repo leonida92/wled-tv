@@ -17,10 +17,12 @@ interface WledControllerClient {
     /**
      * Synchronous frame dispatch for a configured [WledDevice].
      * High-frequency hot path for 60Hz loop pacing without coroutine dispatch jitter.
+     * Accepts a pre-formatted [wirePayload] (pre-ordered wire channels, 3 bytes per LED for RGB,
+     * 4 bytes per LED for RGBW) and transmits directly to the fixture.
      *
      * @return Number of UDP datagrams successfully sent (0 on failure).
      */
-    fun sendFrame(device: WledDevice, rgb: ByteArray, ledCount: Int = device.totalLeds): Int
+    fun sendFrame(device: WledDevice, wirePayload: ByteArray, ledCount: Int = device.totalLeds): Int
 
     /**
      * Wakes the device and sets its configured brightness via HTTP REST.

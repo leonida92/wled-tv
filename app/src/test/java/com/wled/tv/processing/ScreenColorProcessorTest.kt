@@ -1,5 +1,10 @@
 package com.wled.tv.processing
 
+import com.wled.tv.model.ColorCalibration
+import com.wled.tv.model.DeviceType
+import com.wled.tv.model.StreamingProtocol
+import com.wled.tv.model.WledDevice
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -362,6 +367,305 @@ class ScreenColorProcessorTest {
 
         val isContentBlack = processor.isFrameCompletelyBlack(buffer, width, height, rowStride, pixelStride)
         org.junit.Assert.assertFalse("Expected active content frame to return false", isContentBlack)
+    }
+
+    @Test
+    fun applySmoothing_instantFactor_copiesValuesDirectly() {
+        val processor = ScreenColorProcessor()
+        val raw = byteArrayOf(100.toByte(), 150.toByte(), 200.toByte())
+        val output = ByteArray(3)
+
+        // Factor 1.0 = instant transition
+        processor.applySmoothing("dev_instant", raw, 1, 1.0f, output)
+
+        assertEquals(100, output[0].toInt() and 0xFF)
+        assertEquals(150, output[1].toInt() and 0xFF)
+        assertEquals(200, output[2].toInt() and 0xFF)
+    }
+
+    @Test
+    fun applySmoothing_subtleChange_usesBaseSmoothing() {
+        val processor = ScreenColorProcessor()
+        val initial = byteArrayOf(100.toByte(), 100.toByte(), 100.toByte())
+        val output = ByteArray(3)
+
+        // Frame 1 initializes state
+        processor.applySmoothing("dev_subtle", initial, 1, 0.2f, output)
+
+        // Frame 2: Subtle delta (R changes from 100 to 110, dist = 10 < 30)
+        val subtle = byteArrayOf(110.toByte(), 100.toByte(), 100.toByte())
+        processor.applySmoothing("dev_subtle", subtle, 1, 0.2f, output)
+
+        // With baseAlpha = 0.2: 100 * 0.8 + 110 * 0.2 = 102
+        assertEquals(102, output[0].toInt() and 0xFF)
+        assertEquals(100, output[1].toInt() and 0xFF)
+        assertEquals(100, output[2].toInt() and 0xFF)
+    }
+
+    @Test
+    fun reset_clearsSmoothingFilterState_restartsFilter() {
+        val processor = ScreenColorProcessor()
+        val initial = byteArrayOf(100.toByte(), 150.toByte(), 200.toByte())
+        val output = ByteArray(3)
+
+        processor.applySmoothing("dev_reset", initial, 1, 0.5f, output)
+        processor.reset()
+
+        val raw2 = byteArrayOf(50.toByte(), 50.toByte(), 50.toByte())
+        processor.applySmoothing("dev_reset", raw2, 1, 1.0f, output)
+
+        assertEquals(50, output[0].toInt() and 0xFF)
+        assertEquals(50, output[1].toInt() and 0xFF)
+        assertEquals(50, output[2].toInt() and 0xFF)
+    }
+
+    @Test
+    fun encodeWireFrame_rgb_all6ColorOrders() {
+        // 2 LEDs: LED 0 = RGB(10, 20, 30), LED 1 = RGB(40, 50, 60)
+        val source = byteArrayOf(
+            10.toByte(), 20.toByte(), 30.toByte(),
+            40.toByte(), 50.toByte(), 60.toByte()
+        )
+        val outWire = ByteArray(6)
+
+        // 1. ORDER_RGB
+        val bytesRgb = ScreenColorProcessor.encodeWireFrame(source, 2, "RGB", false, "OFF", outWire)
+        assertEquals(6, bytesRgb)
+        assertArrayEquals(
+            byteArrayOf(10, 20, 30, 40, 50, 60),
+            outWire
+        )
+
+        // 2. ORDER_GRB
+        val bytesGrb = ScreenColorProcessor.encodeWireFrame(source, 2, "GRB", false, "OFF", outWire)
+        assertEquals(6, bytesGrb)
+        assertArrayEquals(
+            byteArrayOf(20, 10, 30, 50, 40, 60),
+            outWire
+        )
+
+        // 3. ORDER_BGR
+        val bytesBgr = ScreenColorProcessor.encodeWireFrame(source, 2, "BGR", false, "OFF", outWire)
+        assertEquals(6, bytesBgr)
+        assertArrayEquals(
+            byteArrayOf(30, 20, 10, 60, 50, 40),
+            outWire
+        )
+
+        // 4. ORDER_BRG
+        val bytesBrg = ScreenColorProcessor.encodeWireFrame(source, 2, "BRG", false, "OFF", outWire)
+        assertEquals(6, bytesBrg)
+        assertArrayEquals(
+            byteArrayOf(30, 10, 20, 60, 40, 50),
+            outWire
+        )
+
+        // 5. ORDER_RBG
+        val bytesRbg = ScreenColorProcessor.encodeWireFrame(source, 2, "RBG", false, "OFF", outWire)
+        assertEquals(6, bytesRbg)
+        assertArrayEquals(
+            byteArrayOf(10, 30, 20, 40, 60, 50),
+            outWire
+        )
+
+        // 6. ORDER_GBR
+        val bytesGbr = ScreenColorProcessor.encodeWireFrame(source, 2, "GBR", false, "OFF", outWire)
+        assertEquals(6, bytesGbr)
+        assertArrayEquals(
+            byteArrayOf(20, 30, 10, 50, 60, 40),
+            outWire
+        )
+    }
+
+    @Test
+    fun encodeWireFrame_rgbw_autoSubtract() {
+        // LED 0 = RGB(200, 100, 50) -> min=50, subtracted R'=150, G'=50, B'=0, W=50
+        val source = byteArrayOf(200.toByte(), 100.toByte(), 50.toByte())
+        val outWire = ByteArray(4)
+
+        // RGB
+        val bytesRgb = ScreenColorProcessor.encodeWireFrame(source, 1, "RGB", true, "AUTO_SUBTRACT", outWire)
+        assertEquals(4, bytesRgb)
+        assertEquals(150, outWire[0].toInt() and 0xFF)
+        assertEquals(50, outWire[1].toInt() and 0xFF)
+        assertEquals(0, outWire[2].toInt() and 0xFF)
+        assertEquals(50, outWire[3].toInt() and 0xFF)
+
+        // GRB
+        ScreenColorProcessor.encodeWireFrame(source, 1, "GRB", true, "AUTO_SUBTRACT", outWire)
+        assertEquals(50, outWire[0].toInt() and 0xFF)
+        assertEquals(150, outWire[1].toInt() and 0xFF)
+        assertEquals(0, outWire[2].toInt() and 0xFF)
+        assertEquals(50, outWire[3].toInt() and 0xFF)
+
+        // BGR
+        ScreenColorProcessor.encodeWireFrame(source, 1, "BGR", true, "AUTO_SUBTRACT", outWire)
+        assertEquals(0, outWire[0].toInt() and 0xFF)
+        assertEquals(50, outWire[1].toInt() and 0xFF)
+        assertEquals(150, outWire[2].toInt() and 0xFF)
+        assertEquals(50, outWire[3].toInt() and 0xFF)
+
+        // BRG
+        ScreenColorProcessor.encodeWireFrame(source, 1, "BRG", true, "AUTO_SUBTRACT", outWire)
+        assertEquals(0, outWire[0].toInt() and 0xFF)
+        assertEquals(150, outWire[1].toInt() and 0xFF)
+        assertEquals(50, outWire[2].toInt() and 0xFF)
+        assertEquals(50, outWire[3].toInt() and 0xFF)
+
+        // RBG
+        ScreenColorProcessor.encodeWireFrame(source, 1, "RBG", true, "AUTO_SUBTRACT", outWire)
+        assertEquals(150, outWire[0].toInt() and 0xFF)
+        assertEquals(0, outWire[1].toInt() and 0xFF)
+        assertEquals(50, outWire[2].toInt() and 0xFF)
+        assertEquals(50, outWire[3].toInt() and 0xFF)
+
+        // GBR
+        ScreenColorProcessor.encodeWireFrame(source, 1, "GBR", true, "AUTO_SUBTRACT", outWire)
+        assertEquals(50, outWire[0].toInt() and 0xFF)
+        assertEquals(0, outWire[1].toInt() and 0xFF)
+        assertEquals(150, outWire[2].toInt() and 0xFF)
+        assertEquals(50, outWire[3].toInt() and 0xFF)
+    }
+
+    @Test
+    fun encodeWireFrame_rgbw_autoAdd() {
+        // LED 0 = RGB(200, 100, 50) -> min=50, AUTO_ADD keeps RGB unchanged and adds W=50
+        val source = byteArrayOf(200.toByte(), 100.toByte(), 50.toByte())
+        val outWire = ByteArray(4)
+
+        val bytes = ScreenColorProcessor.encodeWireFrame(source, 1, "RGB", true, "AUTO_ADD", outWire)
+        assertEquals(4, bytes)
+        assertEquals(200, outWire[0].toInt() and 0xFF)
+        assertEquals(100, outWire[1].toInt() and 0xFF)
+        assertEquals(50, outWire[2].toInt() and 0xFF)
+        assertEquals(50, outWire[3].toInt() and 0xFF)
+    }
+
+    @Test
+    fun encodeWireFrame_rgbw_off() {
+        // LED 0 = RGB(200, 100, 50) -> OFF leaves RGB unchanged and sets W=0
+        val source = byteArrayOf(200.toByte(), 100.toByte(), 50.toByte())
+        val outWire = ByteArray(4)
+
+        val bytes = ScreenColorProcessor.encodeWireFrame(source, 1, "RGB", true, "OFF", outWire)
+        assertEquals(4, bytes)
+        assertEquals(200, outWire[0].toInt() and 0xFF)
+        assertEquals(100, outWire[1].toInt() and 0xFF)
+        assertEquals(50, outWire[2].toInt() and 0xFF)
+        assertEquals(0, outWire[3].toInt() and 0xFF)
+    }
+
+    @Test
+    fun encodeWireFrame_deviceOverload_matchesCompanion() {
+        val processor = ScreenColorProcessor()
+        val device = WledDevice(
+            id = "test_dev",
+            type = DeviceType.LEFT_AMBIENT,
+            ledCount = 2,
+            calibration = ColorCalibration(
+                colorOrder = "GRB",
+                isRgbw = true,
+                rgbwMode = "AUTO_SUBTRACT"
+            )
+        )
+        val source = byteArrayOf(
+            200.toByte(), 100.toByte(), 50.toByte(),
+            80.toByte(), 90.toByte(), 100.toByte()
+        )
+        val outDevice = ByteArray(8)
+        val outCompanion = ByteArray(8)
+
+        val writtenDev = processor.encodeWireFrame(device, source, outDevice)
+        val writtenComp = ScreenColorProcessor.encodeWireFrame(
+            sourceRgb = source,
+            ledCount = 2,
+            colorOrder = "GRB",
+            isRgbw = true,
+            rgbwMode = "AUTO_SUBTRACT",
+            outputWire = outCompanion
+        )
+
+        assertEquals(8, writtenDev)
+        assertEquals(8, writtenComp)
+        assertArrayEquals(outCompanion, outDevice)
+    }
+
+    @Test
+    fun encodeWireFrame_deviceOverload_respectsProtocolSafety() {
+        val processor = ScreenColorProcessor()
+        val drgbDevice = WledDevice(
+            id = "test_drgb",
+            type = DeviceType.LEFT_AMBIENT,
+            protocol = StreamingProtocol.DRGB,
+            ledCount = 1,
+            calibration = ColorCalibration(isRgbw = true, colorOrder = "RGB")
+        )
+        val ddpDevice = WledDevice(
+            id = "test_ddp",
+            type = DeviceType.LEFT_AMBIENT,
+            protocol = StreamingProtocol.DDP,
+            ledCount = 1,
+            calibration = ColorCalibration(isRgbw = true, colorOrder = "RGB")
+        )
+        val source = byteArrayOf(255.toByte(), 255.toByte(), 255.toByte())
+        val outDrgb = ByteArray(3)
+        val outDdp = ByteArray(4)
+
+        val writtenDrgb = processor.encodeWireFrame(drgbDevice, source, outDrgb)
+        val writtenDdp = processor.encodeWireFrame(ddpDevice, source, outDdp)
+
+        assertEquals(3, writtenDrgb)
+        assertEquals(4, writtenDdp)
+    }
+
+    @Test
+    fun encodeWireFrame_invalidInputs_returnsZero() {
+        val source = byteArrayOf(10, 20, 30)
+        val outWire = ByteArray(4)
+
+        // Negative or zero ledCount
+        assertEquals(0, ScreenColorProcessor.encodeWireFrame(source, 0, "RGB", false, "OFF", outWire))
+        assertEquals(0, ScreenColorProcessor.encodeWireFrame(source, -1, "RGB", false, "OFF", outWire))
+
+        // Undersized source
+        assertEquals(0, ScreenColorProcessor.encodeWireFrame(source, 2, "RGB", false, "OFF", ByteArray(6)))
+
+        // Undersized outputWire
+        assertEquals(0, ScreenColorProcessor.encodeWireFrame(source, 1, "RGB", false, "OFF", ByteArray(2)))
+        assertEquals(0, ScreenColorProcessor.encodeWireFrame(source, 1, "RGB", true, "OFF", ByteArray(3)))
+    }
+
+    @Test
+    fun parseColorOrder_handlesCaseAndWhitespace() {
+        assertEquals(ScreenColorProcessor.ORDER_RGB, ScreenColorProcessor.parseColorOrder("RGB"))
+        assertEquals(ScreenColorProcessor.ORDER_GRB, ScreenColorProcessor.parseColorOrder("grb"))
+        assertEquals(ScreenColorProcessor.ORDER_BGR, ScreenColorProcessor.parseColorOrder("  bgr  "))
+        assertEquals(ScreenColorProcessor.ORDER_BRG, ScreenColorProcessor.parseColorOrder("BrG"))
+        assertEquals(ScreenColorProcessor.ORDER_RBG, ScreenColorProcessor.parseColorOrder("rbg"))
+        assertEquals(ScreenColorProcessor.ORDER_GBR, ScreenColorProcessor.parseColorOrder("gbr"))
+        assertEquals(ScreenColorProcessor.ORDER_RGB, ScreenColorProcessor.parseColorOrder("unknown"))
+        assertEquals(ScreenColorProcessor.ORDER_RGB, ScreenColorProcessor.parseColorOrder(null))
+    }
+
+    @Test
+    fun encodeWireFrame_zeroAllocationSafety() {
+        val source = ByteArray(300) { (it % 256).toByte() }
+        val dest = ByteArray(400)
+
+        // Warm up JIT
+        repeat(5000) {
+            ScreenColorProcessor.encodeWireFrame(source, 100, "GRB", true, "AUTO_SUBTRACT", dest)
+        }
+
+        val memoryBefore = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()
+        repeat(10000) {
+            ScreenColorProcessor.encodeWireFrame(source, 100, "GRB", true, "AUTO_SUBTRACT", dest)
+        }
+        val memoryAfter = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()
+
+        // Allocations over 10,000 iterations should be negligible (< 64KB)
+        val diff = memoryAfter - memoryBefore
+        assertTrue("Allocated memory delta ($diff bytes) should be minimal (< 65536 bytes)", diff < 65536)
     }
 }
 

@@ -34,6 +34,7 @@ import com.wled.tv.model.WledDevice
 import com.wled.tv.network.DeviceReachabilityCache
 import com.wled.tv.network.DefaultWledControllerClient
 import com.wled.tv.network.WledControllerClient
+import com.wled.tv.processing.ScreenColorProcessor
 
 import com.wled.tv.service.AmbientCaptureService
 import com.wled.tv.ui.views.PerformanceHistoryChartView
@@ -443,27 +444,39 @@ class MainActivity : AppCompatActivity(),
         testPatternJob = lifecycleScope.launch(Dispatchers.IO) {
             val devices = config.enabledDevices
             var step = 0
+            val testBuffers = HashMap<String, ByteArray>()
+            val wireBuffers = HashMap<String, ByteArray>()
+            for (dev in devices) {
+                val leds = dev.totalLeds
+                if (leds > 0) {
+                    testBuffers[dev.id] = ByteArray(leds * 3)
+                    wireBuffers[dev.id] = ByteArray(leds * dev.wireBytesPerLed)
+                }
+            }
+            val hsv = floatArrayOf(0f, 1.0f, 1.0f)
 
             while (isTesting) {
                 for (dev in devices) {
                     val leds = dev.totalLeds
                     if (leds <= 0) continue
-                    val testBuffer = ByteArray(leds * 3)
+                    val testBuffer = testBuffers[dev.id] ?: continue
+                    val wireBuffer = wireBuffers[dev.id] ?: continue
 
                     for (i in 0 until leds) {
                         val idx = i * 3
-                        val hue = ((step * 4 + (i * 360 / leds)) % 360).toFloat()
-                        val rgb = Color.HSVToColor(floatArrayOf(hue, 1.0f, 1.0f))
+                        hsv[0] = ((step * 4 + (i * 360 / leds)) % 360).toFloat()
+                        val rgb = Color.HSVToColor(hsv)
                         testBuffer[idx] = Color.red(rgb).toByte()
                         testBuffer[idx + 1] = Color.green(rgb).toByte()
                         testBuffer[idx + 2] = Color.blue(rgb).toByte()
                     }
 
+                    ScreenColorProcessor.encodeWireFrame(dev, testBuffer, wireBuffer)
+
                     controllerClient.sendFrame(
                         device = dev,
-                        rgb = testBuffer,
-                        ledCount = leds,
-
+                        wirePayload = wireBuffer,
+                        ledCount = leds
                     )
 
                     launch(Dispatchers.Main) {
