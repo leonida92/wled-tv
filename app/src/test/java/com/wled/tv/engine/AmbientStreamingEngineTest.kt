@@ -118,10 +118,13 @@ class AmbientStreamingEngineTest {
 
         val initialRaw = engine.getRawBuffer("dev1")
         val initialDevice = engine.getDeviceBuffer("dev1")
+        val initialWire = engine.getWireBuffer("dev1")
         assertNotNull("Raw buffer should be pre-allocated", initialRaw)
         assertNotNull("Device buffer should be pre-allocated", initialDevice)
+        assertNotNull("Wire buffer should be pre-allocated", initialWire)
         assertEquals(90, initialRaw?.size)
         assertEquals(90, initialDevice?.size)
+        assertEquals(90, initialWire?.size)
 
         val frame = createSolidColorFrame(r = 120, g = 80, b = 40)
         val width = 320
@@ -138,10 +141,12 @@ class AmbientStreamingEngineTest {
 
         val afterRaw = engine.getRawBuffer("dev1")
         val afterDevice = engine.getDeviceBuffer("dev1")
+        val afterWire = engine.getWireBuffer("dev1")
 
         // Exact object references must match: zero allocations in hot path
         assertSame("Raw buffer instance must not be re-allocated in steady state", initialRaw, afterRaw)
         assertSame("Device buffer instance must not be re-allocated in steady state", initialDevice, afterDevice)
+        assertSame("Wire buffer instance must not be re-allocated in steady state", initialWire, afterWire)
     }
 
     @Test
@@ -448,4 +453,196 @@ class AmbientStreamingEngineTest {
         engine.close()
         assertTrue(fakeControllerClient.isClosed)
     }
-}
+
+    @Test
+    fun testThreeStagePipeline_colorOrderGrb_transmitsGrbWhilePreviewAndOverlayStayRgb() {
+        val device = WledDevice(
+            id = "dev_grb",
+            name = "GRB Strip",
+            ip = "192.168.1.60",
+            port = 4048,
+            protocol = StreamingProtocol.DDP,
+            enabled = true,
+            type = DeviceType.FULL_SCREEN,
+            ledCount = 2,
+            calibration = ColorCalibration(
+                colorOrder = "GRB",
+                smoothingFactor = 1.0f
+            )
+        )
+        val config = WledConfig(devices = listOf(device))
+        val engine = AmbientStreamingEngine(
+            initialConfig = config,
+            colorProcessor = colorProcessor,
+            controllerClient = fakeControllerClient,
+            clock = clock
+        )
+
+        var lastPreviewRgb: ByteArray? = null
+        var lastPreviewCount = 0
+        engine.liveFrameListener = AmbientStreamingEngine.LiveFrameListener { deviceId, rgb, count ->
+            if (deviceId == "dev_grb") {
+                lastPreviewRgb = rgb
+                lastPreviewCount = count
+            }
+        }
+
+        val rawBuf = engine.getRawBuffer("dev_grb")
+        assertNotNull(rawBuf)
+        for (i in 0 until 2) {
+            rawBuf!![i * 3 + 0] = 200.toByte() // R
+            rawBuf[i * 3 + 1] = 100.toByte() // G
+            rawBuf[i * 3 + 2] = 50.toByte()  // B
+        }
+
+        clock.advance(50L)
+        engine.tickStreaming()
+
+        // 1. Controller receives [G, R, B] wire payload
+        assertEquals(1, fakeControllerClient.sentFrames.size)
+        val sent = fakeControllerClient.sentFrames[0]
+        assertEquals(2, sent.ledCount)
+        assertEquals(6, sent.wirePayload.size)
+        // LED 0
+        assertEquals(100.toByte(), sent.wirePayload[0]) // G
+        assertEquals(200.toByte(), sent.wirePayload[1]) // R
+        assertEquals(50.toByte(), sent.wirePayload[2])  // B
+        // LED 1
+        assertEquals(100.toByte(), sent.wirePayload[3]) // G
+        assertEquals(200.toByte(), sent.wirePayload[4]) // R
+        assertEquals(50.toByte(), sent.wirePayload[5])  // B
+
+        // 2. liveFrameListener receives canonical [R, G, B]
+        assertNotNull(lastPreviewRgb)
+        assertEquals(2, lastPreviewCount)
+        assertEquals(6, lastPreviewRgb!!.size)
+        assertEquals(200.toByte(), lastPreviewRgb!![0]) // R
+        assertEquals(100.toByte(), lastPreviewRgb!![1]) // G
+        assertEquals(50.toByte(), lastPreviewRgb!![2])  // B
+        assertEquals(200.toByte(), lastPreviewRgb!![3]) // R
+        assertEquals(100.toByte(), lastPreviewRgb!![4]) // G
+        assertEquals(50.toByte(), lastPreviewRgb!![5])  // B
+
+        // 3. getOverlayData() returns canonical [R, G, B]
+        val overlay = engine.getOverlayData(device)
+        assertNotNull(overlay)
+        assertEquals(2, overlay!!.ledCount)
+        assertEquals(6, overlay.rgb.size)
+        assertEquals(200.toByte(), overlay.rgb[0]) // R
+        assertEquals(100.toByte(), overlay.rgb[1]) // G
+        assertEquals(50.toByte(), overlay.rgb[2])  // B
+        assertEquals(200.toByte(), overlay.rgb[3]) // R
+        assertEquals(100.toByte(), overlay.rgb[4]) // G
+        assertEquals(50.toByte(), overlay.rgb[5])  // B
+    }
+
+    @Test
+    fun testThreeStagePipeline_rgbwAutoSubtract_transmits4BytesWhilePreviewStays3BytesRgb() {
+        val device = WledDevice(
+            id = "dev_rgbw",
+            name = "RGBW Strip",
+            ip = "192.168.1.61",
+            port = 4048,
+            protocol = StreamingProtocol.DDP,
+            enabled = true,
+            type = DeviceType.FULL_SCREEN,
+            ledCount = 1,
+            calibration = ColorCalibration(
+                colorOrder = "RGB",
+                isRgbw = true,
+                rgbwMode = "AUTO_SUBTRACT",
+                smoothingFactor = 1.0f
+            )
+        )
+        val config = WledConfig(devices = listOf(device))
+        val engine = AmbientStreamingEngine(
+            initialConfig = config,
+            colorProcessor = colorProcessor,
+            controllerClient = fakeControllerClient,
+            clock = clock
+        )
+
+        var lastPreviewRgb: ByteArray? = null
+        engine.liveFrameListener = AmbientStreamingEngine.LiveFrameListener { deviceId, rgb, _ ->
+            if (deviceId == "dev_rgbw") {
+                lastPreviewRgb = rgb
+            }
+        }
+
+        // Target: R=200, G=150, B=100. Min(R,G,B) = 100 -> W=100.
+        // AUTO_SUBTRACT -> R'=100, G'=50, B'=0, W=100
+        val rawBuf = engine.getRawBuffer("dev_rgbw")
+        assertNotNull(rawBuf)
+        rawBuf!![0] = 200.toByte()
+        rawBuf[1] = 150.toByte()
+        rawBuf[2] = 100.toByte()
+
+        clock.advance(50L)
+        engine.tickStreaming()
+
+        // 1. Controller receives 4 bytes: [R', G', B', W] = [100, 50, 0, 100]
+        assertEquals(1, fakeControllerClient.sentFrames.size)
+        val sent = fakeControllerClient.sentFrames[0]
+        assertEquals(1, sent.ledCount)
+        assertEquals(4, sent.wirePayload.size)
+        assertEquals(100.toByte(), sent.wirePayload[0]) // R'
+        assertEquals(50.toByte(), sent.wirePayload[1])  // G'
+        assertEquals(0.toByte(), sent.wirePayload[2])   // B'
+        assertEquals(100.toByte(), sent.wirePayload[3]) // W
+
+        // 2. liveFrameListener receives 3 bytes: canonical [200, 150, 100]
+        assertNotNull(lastPreviewRgb)
+        assertEquals(3, lastPreviewRgb!!.size)
+        assertEquals(200.toByte(), lastPreviewRgb!![0])
+        assertEquals(150.toByte(), lastPreviewRgb!![1])
+        assertEquals(100.toByte(), lastPreviewRgb!![2])
+
+        // 3. getOverlayData() returns 3 bytes: canonical [200, 150, 100]
+        val overlay = engine.getOverlayData(device)
+        assertNotNull(overlay)
+        assertEquals(1, overlay!!.ledCount)
+        assertEquals(3, overlay.rgb.size)
+        assertEquals(200.toByte(), overlay.rgb[0])
+        assertEquals(150.toByte(), overlay.rgb[1])
+        assertEquals(100.toByte(), overlay.rgb[2])
+    }
+
+    @Test
+    fun testBufferResizing_adjustsWireBuffersWhenSwitchingBetweenRgbAndRgbw() {
+        val devRgb = WledDevice(
+            id = "dev_toggle",
+            name = "Toggle Strip",
+            ip = "192.168.1.62",
+            type = DeviceType.FULL_SCREEN,
+            enabled = true,
+            ledCount = 10,
+            calibration = ColorCalibration(isRgbw = false)
+        )
+        val configRgb = WledConfig(devices = listOf(devRgb))
+        val engine = AmbientStreamingEngine(
+            initialConfig = configRgb,
+            colorProcessor = colorProcessor,
+            controllerClient = fakeControllerClient,
+            clock = clock
+        )
+
+        assertEquals(30, engine.getRawBuffer("dev_toggle")?.size)
+        assertEquals(30, engine.getDeviceBuffer("dev_toggle")?.size)
+        assertEquals(30, engine.getWireBuffer("dev_toggle")?.size)
+
+        // Switch to RGBW (10 LEDs * 4 bytes = 40 bytes wire buffer)
+        val devRgbw = devRgb.copy(calibration = ColorCalibration(isRgbw = true))
+        val configRgbw = WledConfig(devices = listOf(devRgbw))
+        engine.updateConfig(configRgbw)
+
+        // Canonical buffers remain 30 (10 * 3)
+        assertEquals(30, engine.getRawBuffer("dev_toggle")?.size)
+        assertEquals(30, engine.getDeviceBuffer("dev_toggle")?.size)
+        // Wire buffer resized to 40 (10 * 4)
+        assertEquals(40, engine.getWireBuffer("dev_toggle")?.size)
+
+        // Switch back to RGB
+        engine.updateConfig(configRgb)
+        assertEquals(30, engine.getWireBuffer("dev_toggle")?.size)
+    }
+}
