@@ -1,6 +1,6 @@
 package com.wled.tv.data
 
-import android.graphics.RectF
+import com.wled.tv.geometry.NormalizedRect
 import com.wled.tv.model.ColorCalibration
 import com.wled.tv.model.Corner
 import com.wled.tv.model.DeviceType

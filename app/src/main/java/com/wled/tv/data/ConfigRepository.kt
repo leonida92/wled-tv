@@ -2,7 +2,7 @@ package com.wled.tv.data
 
 import android.content.Context
 import android.content.SharedPreferences
-import android.graphics.RectF
+import com.wled.tv.geometry.NormalizedRect
 import com.wled.tv.model.ColorCalibration
 import com.wled.tv.model.Corner
 import com.wled.tv.model.DeviceType
@@ -305,12 +305,12 @@ class ConfigRepository(
                     autoLetterbox = obj.optBoolean("autoLetterbox", true)
                 )
 
-                val customRect = RectF().apply {
-                    left = obj.optDouble("rectL", 0.0).toFloat()
-                    top = obj.optDouble("rectT", 0.0).toFloat()
-                    right = obj.optDouble("rectR", 1.0).toFloat()
+                val customRect = NormalizedRect(
+                    left = obj.optDouble("rectL", 0.0).toFloat(),
+                    top = obj.optDouble("rectT", 0.0).toFloat(),
+                    right = obj.optDouble("rectR", 1.0).toFloat(),
                     bottom = obj.optDouble("rectB", 1.0).toFloat()
-                }
+                )
 
                 val devCalibration = if (obj.has("cal_sat")) {
                     ColorCalibration(

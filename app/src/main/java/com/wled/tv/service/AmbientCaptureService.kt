@@ -248,9 +248,9 @@ class AmbientCaptureService : Service() {
 
 
 
-            val currentCrop = currentEngine.colorProcessor.currentTopCrop
+            val currentCrop = currentEngine.geometryEngine.currentTopCrop
 
-            val currentLeft = currentEngine.colorProcessor.currentLeftCrop
+            val currentLeft = currentEngine.geometryEngine.currentLeftCrop
 
             if (isOverlayVisible && overlayView != null && (currentCrop != lastOverlayTopCrop || currentLeft != lastOverlayLeftCrop || now - lastOverlayUpdateTime >= 250L)) {
 
@@ -1300,9 +1300,9 @@ class AmbientCaptureService : Service() {
 
         val currentEngine = engine ?: return
 
-        lastOverlayTopCrop = currentEngine.colorProcessor.currentTopCrop
+        lastOverlayTopCrop = currentEngine.geometryEngine.currentTopCrop
 
-        lastOverlayLeftCrop = currentEngine.colorProcessor.currentLeftCrop
+        lastOverlayLeftCrop = currentEngine.geometryEngine.currentLeftCrop
 
         view.updateFromEngine(currentEngine, latestSystemStatsString)
 

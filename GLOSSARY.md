@@ -12,6 +12,10 @@ _Avoid_: CaptureService, StreamingService, BackgroundEngine
 The reactive state store providing observable, thread-safe access to lighting configuration and device fleet settings.
 _Avoid_: PreferencesManager, SettingsHelper, ConfigModel
 
+**FixtureGeometryEngine**:
+The dedicated geometry domain engine consolidating physical LED perimeter coordinates, ambient fixture sub-zone partitioning, dynamic aspect crop state (letterbox/pillarbox snapping), and UI preview canvas layout vector generation.
+_Avoid_: PerimeterHelper, ZoneCalculator, LayoutEngine, RectHelper
+
 **ScreenColorProcessor**:
 The consolidated optical color processing engine executing spatial box sampling, calibration curve lookups, adaptive temporal smoothing, and hardware wire-channel gamut mapping.
 _Avoid_: ColorSmoothingFilter, ColorFilter, ColorMapper, ColorConverter

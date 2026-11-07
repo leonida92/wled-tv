@@ -17,7 +17,7 @@
 - **Pass 1 (v1.3.2):** In-process `AmbientStreamingEngine` and reactive `ConfigRepository` (see `docs/adr/0001-in-process-streaming-engine-and-reactive-config.md`).
 - **Pass 2 (v1.3.3):** Unified `WledControllerClient` deep module and shared socket lifecycle (see `docs/adr/0002-unified-wled-controller-client.md`).
 - **Pass 3 (v1.3.4):** Optical Color Pipeline Consolidation & pure byte transport (see `docs/adr/0003-optical-color-pipeline-and-wire-encoding.md`).
-- **Pass 4 (Upcoming):** `FixtureGeometryEngine` — consolidating physical LED coordinate math, perimeter border calculations, aspect ratio crop math, and canvas layout vector generation.
+- **Pass 4 (v1.3.5):** Fixture Geometry Engine & Canvas Layout Solvers (see `docs/adr/0004-fixture-geometry-engine.md`).
 
 ## Agent skills
 

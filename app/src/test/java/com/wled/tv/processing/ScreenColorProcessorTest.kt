@@ -1,5 +1,6 @@
 package com.wled.tv.processing
 
+import com.wled.tv.geometry.FixtureGeometryEngine
 import com.wled.tv.model.ColorCalibration
 import com.wled.tv.model.DeviceType
 import com.wled.tv.model.StreamingProtocol
@@ -94,8 +95,9 @@ class ScreenColorProcessorTest {
     }
 
     @Test
-    fun scanLetterbox_channelBugImmunity_ignoresCornerWatermark() {
+    fun scanBorderProbes_channelBugImmunity_ignoresCornerWatermark() {
         val processor = ScreenColorProcessor()
+        val geometryEngine = FixtureGeometryEngine()
         val width = 320
         val height = 180
         val rowStride = width * 4
@@ -127,18 +129,25 @@ class ScreenColorProcessorTest {
 
         // Feed 35 frames to satisfy 30-frame temporal hysteresis
         for (frame in 1..35) {
-            processor.scanLetterbox(buffer, width, height, rowStride, pixelStride)
+            processor.scanBorderProbes(buffer, width, height, rowStride, pixelStride)
+            geometryEngine.updateDetectedBorders(
+                processor.lastDetectedTopCropPct,
+                processor.lastDetectedBottomCropPct,
+                processor.lastDetectedLeftCropPct,
+                processor.lastDetectedRightCropPct
+            )
         }
 
         // The channel logo in row 2..8 should be rejected by quorum thresholding!
         // Top crop should be Cinemascope 0.130f, NOT 0.0f (which would happen if logo triggered 16:9).
-        assertEquals(0.130f, processor.currentTopCrop, 0.005f)
-        assertEquals(0.130f, processor.currentBottomCrop, 0.005f)
+        assertEquals(0.130f, geometryEngine.currentTopCrop, 0.005f)
+        assertEquals(0.130f, geometryEngine.currentBottomCrop, 0.005f)
     }
 
     @Test
-    fun scanLetterbox_detects43Pillarbox_andSnapsTo125Percent() {
+    fun scanBorderProbes_detects43Pillarbox_andSnapsTo125Percent() {
         val processor = ScreenColorProcessor()
+        val geometryEngine = FixtureGeometryEngine()
         val width = 320
         val height = 180
         val rowStride = width * 4
@@ -163,19 +172,26 @@ class ScreenColorProcessorTest {
 
         // Feed 35 frames to satisfy 30-frame hysteresis for shrinking
         for (frame in 1..35) {
-            processor.scanLetterbox(buffer, width, height, rowStride, pixelStride)
+            processor.scanBorderProbes(buffer, width, height, rowStride, pixelStride)
+            geometryEngine.updateDetectedBorders(
+                processor.lastDetectedTopCropPct,
+                processor.lastDetectedBottomCropPct,
+                processor.lastDetectedLeftCropPct,
+                processor.lastDetectedRightCropPct
+            )
         }
 
         // Horizontal pillarbox detected at 12.5%
-        assertEquals(0.125f, processor.currentLeftCrop, 0.005f)
-        assertEquals(0.125f, processor.currentRightCrop, 0.005f)
+        assertEquals(0.125f, geometryEngine.currentLeftCrop, 0.005f)
+        assertEquals(0.125f, geometryEngine.currentRightCrop, 0.005f)
         // Vertical letterbox should be 0.0f (touches top and bottom)
-        assertEquals(0.0f, processor.currentTopCrop, 0.001f)
+        assertEquals(0.0f, geometryEngine.currentTopCrop, 0.001f)
     }
 
     @Test
-    fun scanLetterbox_fullscreen169_hasZeroCrops() {
+    fun scanBorderProbes_fullscreen169_hasZeroCrops() {
         val processor = ScreenColorProcessor()
+        val geometryEngine = FixtureGeometryEngine()
         val width = 320
         val height = 180
         val rowStride = width * 4
@@ -194,18 +210,25 @@ class ScreenColorProcessorTest {
         }
 
         for (frame in 1..35) {
-            processor.scanLetterbox(buffer, width, height, rowStride, pixelStride)
+            processor.scanBorderProbes(buffer, width, height, rowStride, pixelStride)
+            geometryEngine.updateDetectedBorders(
+                processor.lastDetectedTopCropPct,
+                processor.lastDetectedBottomCropPct,
+                processor.lastDetectedLeftCropPct,
+                processor.lastDetectedRightCropPct
+            )
         }
 
-        assertEquals(0.0f, processor.currentTopCrop, 0.001f)
-        assertEquals(0.0f, processor.currentBottomCrop, 0.001f)
-        assertEquals(0.0f, processor.currentLeftCrop, 0.001f)
-        assertEquals(0.0f, processor.currentRightCrop, 0.001f)
+        assertEquals(0.0f, geometryEngine.currentTopCrop, 0.001f)
+        assertEquals(0.0f, geometryEngine.currentBottomCrop, 0.001f)
+        assertEquals(0.0f, geometryEngine.currentLeftCrop, 0.001f)
+        assertEquals(0.0f, geometryEngine.currentRightCrop, 0.001f)
     }
 
     @Test
     fun getActiveZones_withPillarbox_shiftsPerimeterAndAmbientZones() {
         val processor = ScreenColorProcessor()
+        val geometryEngine = FixtureGeometryEngine()
         val width = 320
         val height = 180
         val rowStride = width * 4
@@ -223,11 +246,17 @@ class ScreenColorProcessorTest {
         }
 
         for (frame in 1..35) {
-            processor.scanLetterbox(buffer, width, height, rowStride, pixelStride)
+            processor.scanBorderProbes(buffer, width, height, rowStride, pixelStride)
+            geometryEngine.updateDetectedBorders(
+                processor.lastDetectedTopCropPct,
+                processor.lastDetectedBottomCropPct,
+                processor.lastDetectedLeftCropPct,
+                processor.lastDetectedRightCropPct
+            )
         }
 
-        assertEquals(0.125f, processor.currentLeftCrop, 0.005f)
-        assertEquals(0.125f, processor.currentRightCrop, 0.005f)
+        assertEquals(0.125f, geometryEngine.currentLeftCrop, 0.005f)
+        assertEquals(0.125f, geometryEngine.currentRightCrop, 0.005f)
 
         // Perimeter device: 10 + 5 + 10 + 5 = 30 LEDs
         val perimeterDev = com.wled.tv.model.WledDevice(
@@ -242,7 +271,7 @@ class ScreenColorProcessorTest {
             )
         )
 
-        val zones = processor.getActiveZones(perimeterDev)
+        val zones = geometryEngine.getActiveZones(perimeterDev)
         assertEquals(30, zones.size)
         // Verify perimeter left edge shifted inward to pillarbox crop boundary (~0.125f)
         assertTrue("Expected zones.first().left >= 0.12f but was ${zones.first().left}", zones.first().left >= 0.12f)
@@ -256,7 +285,7 @@ class ScreenColorProcessorTest {
             ledCount = 1,
             perimeter = com.wled.tv.model.PerimeterConfig(autoLetterbox = true)
         )
-        val ambientZones = processor.getActiveZones(leftAmbientDev)
+        val ambientZones = geometryEngine.getActiveZones(leftAmbientDev)
         assertEquals(1, ambientZones.size)
         assertTrue(ambientZones.first().left >= 0.12f)
     }
@@ -264,6 +293,7 @@ class ScreenColorProcessorTest {
     @Test
     fun overlayRejection_disabledWhenOverlayNotVisible_preservesTealAndBlueScenes() {
         val processor = ScreenColorProcessor()
+        val geometryEngine = FixtureGeometryEngine()
         processor.isOverlayActive = false
 
         val width = 320
@@ -284,10 +314,16 @@ class ScreenColorProcessorTest {
             }
         }
 
-        // scanLetterbox should NOT consider this dark teal/blue frame as black letterbox
-        processor.scanLetterbox(buffer, width, height, rowStride, pixelStride)
-        assertEquals(0.0f, processor.currentTopCrop, 0.001f)
-        assertEquals(0.0f, processor.currentLeftCrop, 0.001f)
+        // scanBorderProbes should NOT consider this dark teal/blue frame as black letterbox
+        processor.scanBorderProbes(buffer, width, height, rowStride, pixelStride)
+        geometryEngine.updateDetectedBorders(
+            processor.lastDetectedTopCropPct,
+            processor.lastDetectedBottomCropPct,
+            processor.lastDetectedLeftCropPct,
+            processor.lastDetectedRightCropPct
+        )
+        assertEquals(0.0f, geometryEngine.currentTopCrop, 0.001f)
+        assertEquals(0.0f, geometryEngine.currentLeftCrop, 0.001f)
 
         // Extracting raw colors should NOT reject the teal pixels when isOverlayActive is false
         val device = com.wled.tv.model.WledDevice(
@@ -296,13 +332,14 @@ class ScreenColorProcessorTest {
             perimeter = com.wled.tv.model.PerimeterConfig(topLeds = 4, rightLeds = 0, bottomLeds = 0, leftLeds = 0)
         )
         val output = ByteArray(4 * 3)
+        val zones = geometryEngine.getActiveZones(device)
         processor.extractRawColors(
             buffer = buffer,
             width = width,
             height = height,
             rowStride = rowStride,
             pixelStride = pixelStride,
-            device = device,
+            zones = zones,
             calibration = com.wled.tv.model.ColorCalibration(),
             outputRawRgb = output
         )
@@ -315,6 +352,7 @@ class ScreenColorProcessorTest {
     @Test
     fun reset_clearsPillarboxState() {
         val processor = ScreenColorProcessor()
+        val geometryEngine = FixtureGeometryEngine()
         val width = 320
         val height = 180
         val rowStride = width * 4
@@ -328,13 +366,20 @@ class ScreenColorProcessorTest {
             }
         }
         for (frame in 1..35) {
-            processor.scanLetterbox(buffer, width, height, rowStride, pixelStride)
+            processor.scanBorderProbes(buffer, width, height, rowStride, pixelStride)
+            geometryEngine.updateDetectedBorders(
+                processor.lastDetectedTopCropPct,
+                processor.lastDetectedBottomCropPct,
+                processor.lastDetectedLeftCropPct,
+                processor.lastDetectedRightCropPct
+            )
         }
-        assertEquals(0.125f, processor.currentLeftCrop, 0.005f)
+        assertEquals(0.125f, geometryEngine.currentLeftCrop, 0.005f)
 
         processor.reset()
-        assertEquals(0.0f, processor.currentLeftCrop, 0.001f)
-        assertEquals(0.0f, processor.currentRightCrop, 0.001f)
+        geometryEngine.reset()
+        assertEquals(0.0f, geometryEngine.currentLeftCrop, 0.001f)
+        assertEquals(0.0f, geometryEngine.currentRightCrop, 0.001f)
     }
 
     @Test

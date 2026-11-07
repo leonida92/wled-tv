@@ -1,6 +1,6 @@
 package com.wled.tv.model
 
-import android.graphics.RectF
+import com.wled.tv.geometry.NormalizedRect
 import java.util.UUID
 
 enum class DeviceType(val displayName: String) {
@@ -24,7 +24,7 @@ data class WledDevice(
     val ledCount: Int = 1,                              // For spot lights / ambient fixtures
     val perimeter: PerimeterConfig = PerimeterConfig(), // For 4-sided perimeter strips
     val calibration: ColorCalibration = ColorCalibration(), // Per-device optical/color calibration
-    val customRect: RectF = RectF(0f, 0f, 1f, 1f)       // For custom boxes
+    val customRect: NormalizedRect = NormalizedRect.FULL // For custom boxes
 ) {
     val colorOrder: String
         get() = calibration.colorOrder
@@ -47,18 +47,6 @@ data class WledDevice(
             DeviceType.RIGHT_AMBIENT -> PerimeterConfig(topLeds = 0, rightLeds = ledCount.coerceAtLeast(1), bottomLeds = 0, leftLeds = 0)
             DeviceType.FULL_SCREEN -> PerimeterConfig(topLeds = 0, rightLeds = 0, bottomLeds = ledCount.coerceAtLeast(1), leftLeds = 0)
             DeviceType.CUSTOM_BOX -> PerimeterConfig(topLeds = 0, rightLeds = 0, bottomLeds = ledCount.coerceAtLeast(1), leftLeds = 0)
-        }
-    }
-
-    fun getSampleRegion(): RectF {
-        return when (type) {
-            DeviceType.PERIMETER -> RectF(0f, 0f, 1f, 1f)
-            DeviceType.LEFT_AMBIENT -> RectF(0f, 0f, 0.25f, 1f)
-            DeviceType.RIGHT_AMBIENT -> RectF(0.75f, 0f, 1f, 1f)
-            DeviceType.TOP_AMBIENT -> RectF(0f, 0f, 1f, 0.25f)
-            DeviceType.BOTTOM_AMBIENT -> RectF(0f, 0.75f, 1f, 1f)
-            DeviceType.FULL_SCREEN -> RectF(0f, 0f, 1f, 1f)
-            DeviceType.CUSTOM_BOX -> customRect
         }
     }
 }

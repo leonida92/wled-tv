@@ -13,7 +13,7 @@ import com.wled.tv.R
 import com.wled.tv.data.ConfigRepository
 import com.wled.tv.model.AspectRatioPreset
 import com.wled.tv.model.WledConfig
-import com.wled.tv.ui.views.ActiveBorder
+import com.wled.tv.geometry.ActiveBorder
 import com.wled.tv.ui.views.ZoneCanvasView
 import java.util.Locale
 
