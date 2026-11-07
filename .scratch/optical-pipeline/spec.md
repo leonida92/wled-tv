@@ -1,6 +1,6 @@
 # Optical Color Pipeline Consolidation Specification
 
-Status: ready-for-agent
+Status: resolved
 
 ## Problem Statement
 
