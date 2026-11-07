@@ -992,6 +992,21 @@ class ScreenColorProcessor {
         }
 
         fun encodeWireFrame(
+            device: WledDevice,
+            sourceRgb: ByteArray,
+            outputWire: ByteArray
+        ): Int {
+            return encodeWireFrame(
+                sourceRgb = sourceRgb,
+                ledCount = device.totalLeds,
+                colorOrder = device.calibration.colorOrder,
+                isRgbw = device.calibration.isRgbw,
+                rgbwMode = device.calibration.rgbwMode,
+                outputWire = outputWire
+            )
+        }
+
+        fun encodeWireFrame(
             sourceRgb: ByteArray,
             ledCount: Int,
             colorOrder: String,

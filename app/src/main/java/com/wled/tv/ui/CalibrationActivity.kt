@@ -21,6 +21,7 @@ import com.wled.tv.model.WledConfig
 import com.wled.tv.model.WledDevice
 import com.wled.tv.network.DefaultWledControllerClient
 import com.wled.tv.network.WledControllerClient
+import com.wled.tv.processing.ScreenColorProcessor
 import com.wled.tv.service.AmbientCaptureService
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -275,11 +276,13 @@ class CalibrationActivity : AppCompatActivity() {
                     frame[idx + 2] = b
                 }
 
+                val wireBuffer = ByteArray(leds * (if (dev.calibration.isRgbw) 4 else 3))
+                ScreenColorProcessor.encodeWireFrame(dev, frame, wireBuffer)
+
                 controllerClient.sendFrame(
                     device = dev,
-                    wirePayload = frame,
-                    ledCount = leds,
-
+                    wirePayload = wireBuffer,
+                    ledCount = leds
                 )
                 delay(100)
             }

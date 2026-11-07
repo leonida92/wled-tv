@@ -34,6 +34,7 @@ import com.wled.tv.model.WledDevice
 import com.wled.tv.network.DeviceReachabilityCache
 import com.wled.tv.network.DefaultWledControllerClient
 import com.wled.tv.network.WledControllerClient
+import com.wled.tv.processing.ScreenColorProcessor
 
 import com.wled.tv.service.AmbientCaptureService
 import com.wled.tv.ui.views.PerformanceHistoryChartView
@@ -459,11 +460,13 @@ class MainActivity : AppCompatActivity(),
                         testBuffer[idx + 2] = Color.blue(rgb).toByte()
                     }
 
+                    val wireBuffer = ByteArray(leds * (if (dev.calibration.isRgbw) 4 else 3))
+                    ScreenColorProcessor.encodeWireFrame(dev, testBuffer, wireBuffer)
+
                     controllerClient.sendFrame(
                         device = dev,
-                        wirePayload = testBuffer,
-                        ledCount = leds,
-
+                        wirePayload = wireBuffer,
+                        ledCount = leds
                     )
 
                     launch(Dispatchers.Main) {
