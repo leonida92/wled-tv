@@ -2,7 +2,7 @@
 
 - **Fast test loop:** Run `cmd /c "gradlew.bat testDebugUnitTest"` to execute JVM unit tests in ~8 seconds without emulators.
 - **TV deployment:** ADB binary is at `$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe`. Deploy to TV via `& "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe" connect 192.168.1.50:5555; & "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe" -s 192.168.1.50:5555 install -r -d <apk-path>`.
-- **Coding standards:** See `CODING_STANDARDS.md` for reactive state, non-blocking UI, and architectural rules enforced during review.
+- **Coding standards:** See `CODING_STANDARDS.md` for reactive state, non-blocking UI, zero-allocation cadence loops, and architectural rules enforced during review.
 
 ## Agent skills
 
