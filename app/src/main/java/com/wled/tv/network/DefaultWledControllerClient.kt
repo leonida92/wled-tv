@@ -51,8 +51,7 @@ class DefaultWledControllerClient internal constructor(
         for (device in devices) {
             val leds = device.totalLeds
             if (leds > 0) {
-                val bytesPerLed = if (device.calibration.isRgbw) 4 else 3
-                val blackBuf = ByteArray(leds * bytesPerLed)
+                val blackBuf = ByteArray(leds * device.wireBytesPerLed)
                 repeat(3) {
                     sendFrame(device, blackBuf, leds)
                 }
@@ -85,8 +84,7 @@ class DefaultWledControllerClient internal constructor(
         val leds = device.totalLeds
         if (leds <= 0) return@withContext
 
-        val bytesPerLed = if (device.calibration.isRgbw) 4 else 3
-        val frameSize = leds * bytesPerLed
+        val frameSize = leds * device.wireBytesPerLed
         val whiteFrame = ByteArray(frameSize) { 255.toByte() }
         val blackFrame = ByteArray(frameSize)
 

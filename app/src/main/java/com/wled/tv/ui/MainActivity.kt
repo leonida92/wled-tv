@@ -444,23 +444,33 @@ class MainActivity : AppCompatActivity(),
         testPatternJob = lifecycleScope.launch(Dispatchers.IO) {
             val devices = config.enabledDevices
             var step = 0
+            val testBuffers = HashMap<String, ByteArray>()
+            val wireBuffers = HashMap<String, ByteArray>()
+            for (dev in devices) {
+                val leds = dev.totalLeds
+                if (leds > 0) {
+                    testBuffers[dev.id] = ByteArray(leds * 3)
+                    wireBuffers[dev.id] = ByteArray(leds * dev.wireBytesPerLed)
+                }
+            }
+            val hsv = floatArrayOf(0f, 1.0f, 1.0f)
 
             while (isTesting) {
                 for (dev in devices) {
                     val leds = dev.totalLeds
                     if (leds <= 0) continue
-                    val testBuffer = ByteArray(leds * 3)
+                    val testBuffer = testBuffers[dev.id] ?: continue
+                    val wireBuffer = wireBuffers[dev.id] ?: continue
 
                     for (i in 0 until leds) {
                         val idx = i * 3
-                        val hue = ((step * 4 + (i * 360 / leds)) % 360).toFloat()
-                        val rgb = Color.HSVToColor(floatArrayOf(hue, 1.0f, 1.0f))
+                        hsv[0] = ((step * 4 + (i * 360 / leds)) % 360).toFloat()
+                        val rgb = Color.HSVToColor(hsv)
                         testBuffer[idx] = Color.red(rgb).toByte()
                         testBuffer[idx + 1] = Color.green(rgb).toByte()
                         testBuffer[idx + 2] = Color.blue(rgb).toByte()
                     }
 
-                    val wireBuffer = ByteArray(leds * (if (dev.calibration.isRgbw) 4 else 3))
                     ScreenColorProcessor.encodeWireFrame(dev, testBuffer, wireBuffer)
 
                     controllerClient.sendFrame(
