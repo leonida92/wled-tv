@@ -133,7 +133,3 @@ data class WledDeviceInfo(
     val isRgbw: Boolean,
     val maxPowerMa: Int
 )
-
-object DeviceReachabilityCache {
-    val map = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
-}

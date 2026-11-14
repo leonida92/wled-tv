@@ -5,7 +5,19 @@ import com.wled.tv.model.DeviceType
 import com.wled.tv.model.PerimeterConfig
 import com.wled.tv.model.StreamingProtocol
 import com.wled.tv.model.WledDevice
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
@@ -16,7 +28,9 @@ import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.util.Collections
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class DefaultWledControllerClientTest {
 
     private lateinit var fakeUdpSender: TestableUdpSender
@@ -56,10 +70,11 @@ class DefaultWledControllerClientTest {
     private class TestableHttpClient : WledHttpClient() {
         val wakeCalls = mutableListOf<Pair<String, Int>>()
         val turnOffCalls = mutableListOf<String>()
-        val checkConnectionCalls = mutableListOf<String>()
+        val checkConnectionCalls: MutableList<String> = Collections.synchronizedList(mutableListOf())
         val fetchDeviceInfoCalls = mutableListOf<String>()
 
         var checkConnectionResult = true
+        val checkConnectionMap = mutableMapOf<String, Boolean>()
         var fetchDeviceInfoResult: WledDeviceInfo? = null
         var turnOffDelayMs = 0L
         var turnOffException: Exception? = null
@@ -80,7 +95,7 @@ class DefaultWledControllerClientTest {
 
         override suspend fun checkConnection(ip: String): Boolean {
             checkConnectionCalls.add(ip)
-            return checkConnectionResult
+            return checkConnectionMap[ip] ?: checkConnectionResult
         }
 
         override suspend fun fetchDeviceInfo(ip: String): WledDeviceInfo? {
@@ -106,7 +121,8 @@ class DefaultWledControllerClientTest {
             protocol = protocol,
             type = DeviceType.PERIMETER,
             perimeter = PerimeterConfig(topLeds = totalLeds, rightLeds = 0, bottomLeds = 0, leftLeds = 0),
-            calibration = ColorCalibration(maxBrightness = maxBrightness, isRgbw = isRgbw)
+            calibration = ColorCalibration(maxBrightness = maxBrightness),
+            isRgbw = isRgbw
         )
     }
 
@@ -116,7 +132,8 @@ class DefaultWledControllerClientTest {
         fakeHttpClient = TestableHttpClient()
         client = DefaultWledControllerClient(
             udpSender = fakeUdpSender,
-            httpClient = fakeHttpClient
+            httpClient = fakeHttpClient,
+            ioDispatcher = Dispatchers.Unconfined
         )
     }
 
@@ -454,5 +471,169 @@ class DefaultWledControllerClientTest {
         client.blackoutFleet(listOf(dev), sendPowerOff = false)
         client.flashDevice(dev, durationMs = 1L)
         assertEquals(5, fakeUdpSender.sentFrames.size)
+    }
+
+    @Test
+    fun discoverDevices_withoutProvider_returnsEmptyFlow() = runTest {
+        val collected = client.discoverDevices().toList()
+        assertTrue(collected.isEmpty())
+    }
+
+    @Test
+    fun discoverDevices_delegatesToInjectedDiscoveryProvider() = runTest {
+        val fakeDevice = DiscoveredWled("wled-livingroom", "192.168.1.150", 80)
+        val testProvider = object : WledDiscoveryProvider {
+            override fun discover(): Flow<DiscoveredWled> = flowOf(fakeDevice)
+        }
+        val clientWithDiscovery = DefaultWledControllerClient(
+            udpSender = fakeUdpSender,
+            httpClient = fakeHttpClient,
+            discoveryProvider = testProvider
+        )
+
+        val results = clientWithDiscovery.discoverDevices().toList()
+        assertEquals(1, results.size)
+        assertEquals(fakeDevice, results[0])
+    }
+
+    @Test
+    fun setDiscoveryProvider_updatesActiveProvider() = runTest {
+        val fakeDevice = DiscoveredWled("wled-kitchen", "192.168.1.151", 80)
+        val testProvider = object : WledDiscoveryProvider {
+            override fun discover(): Flow<DiscoveredWled> = flowOf(fakeDevice)
+        }
+
+        assertEquals(0, client.discoverDevices().toList().size)
+
+        client.setDiscoveryProvider(testProvider)
+        val results = client.discoverDevices().toList()
+        assertEquals(1, results.size)
+        assertEquals(fakeDevice, results[0])
+    }
+
+    @Test
+    fun fakeWledControllerClient_discoverDevices_emitsFixtures() = runTest {
+        val fake = FakeWledControllerClient()
+        val emitted = mutableListOf<DiscoveredWled>()
+        val collectJob = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            fake.discoverDevices().collect { emitted.add(it) }
+        }
+
+        val dev1 = DiscoveredWled("wled-1", "192.168.1.201", 80)
+        val dev2 = DiscoveredWled("wled-2", "192.168.1.202", 80)
+
+        fake.discoveryFlow.emit(dev1)
+        fake.discoveryFlow.emit(dev2)
+
+        assertEquals(listOf(dev1, dev2), emitted)
+        collectJob.cancel()
+    }
+
+    @Test
+    fun checkConnection_updatesReachabilityFlowEntryAndTrimsIp() = runTest {
+        fakeHttpClient.checkConnectionMap["192.168.1.110"] = true
+        assertTrue(client.checkConnection(" 192.168.1.110 "))
+        assertEquals(mapOf("192.168.1.110" to true), client.reachabilityFlow.value)
+
+        fakeHttpClient.checkConnectionMap["192.168.1.110"] = false
+        assertFalse(client.checkConnection("192.168.1.110"))
+        assertEquals(mapOf("192.168.1.110" to false), client.reachabilityFlow.value)
+    }
+
+    @Test
+    fun probeReachability_deduplicatesUniqueIps_andPrunesRemovedIps() = runTest {
+        val dev1 = createDevice(id = "d1", ip = "192.168.1.10")
+        val dev2 = createDevice(id = "d2", ip = " 192.168.1.10 ")
+        val dev3 = createDevice(id = "d3", ip = "192.168.1.20")
+        val blankDev = createDevice(id = "d4", ip = "   ")
+
+        fakeHttpClient.checkConnectionMap["192.168.1.10"] = true
+        fakeHttpClient.checkConnectionMap["192.168.1.20"] = false
+
+        val firstSnapshot = client.probeReachability(listOf(dev1, dev2, dev3, blankDev))
+
+        assertEquals(
+            mapOf("192.168.1.10" to true, "192.168.1.20" to false),
+            firstSnapshot
+        )
+        assertEquals(firstSnapshot, client.reachabilityFlow.value)
+        // Unique IPs only: 192.168.1.10 and 192.168.1.20
+        assertEquals(2, fakeHttpClient.checkConnectionCalls.size)
+
+        // Remove dev3 and probe again: 192.168.1.20 must be pruned from reachabilityFlow
+        val prunedSnapshot = client.probeReachability(listOf(dev1))
+        assertEquals(mapOf("192.168.1.10" to true), prunedSnapshot)
+        assertEquals(mapOf("192.168.1.10" to true), client.reachabilityFlow.value)
+
+        // Empty device list clears reachabilityFlow
+        val emptySnapshot = client.probeReachability(emptyList())
+        assertTrue(emptySnapshot.isEmpty())
+        assertTrue(client.reachabilityFlow.value.isEmpty())
+    }
+
+    @Test
+    fun reachabilityFlow_isInstanceScopedAcrossClients() = runTest {
+        val otherHttpClient = TestableHttpClient().apply { checkConnectionResult = false }
+        val otherClient = DefaultWledControllerClient(
+            udpSender = TestableUdpSender(),
+            httpClient = otherHttpClient
+        )
+
+        fakeHttpClient.checkConnectionResult = true
+        client.checkConnection("192.168.1.55")
+        otherClient.checkConnection("192.168.1.66")
+
+        assertEquals(mapOf("192.168.1.55" to true), client.reachabilityFlow.value)
+        assertEquals(mapOf("192.168.1.66" to false), otherClient.reachabilityFlow.value)
+    }
+
+    @Test
+    fun observeReachability_pollsOnInterval_reactsToIpChanges_andStopsOnCancel() = runTest {
+        val dev1 = createDevice(id = "d1", ip = "192.168.1.30")
+        val dev2 = createDevice(id = "d2", ip = "192.168.1.31")
+        val devicesFlow = MutableStateFlow(listOf(dev1))
+        val snapshots = mutableListOf<Map<String, Boolean>>()
+
+        fakeHttpClient.checkConnectionMap[dev1.ip] = true
+        fakeHttpClient.checkConnectionMap[dev2.ip] = false
+
+        val pollJob = client.observeReachability(devicesFlow, intervalMs = 5000L)
+            .onEach { snapshots.add(it) }
+            .launchIn(this)
+
+        runCurrent()
+        assertEquals(1, snapshots.size)
+        assertEquals(mapOf(dev1.ip to true), client.reachabilityFlow.value)
+
+        // Non-IP field change (e.g. name) should NOT trigger extra immediate probe
+        devicesFlow.value = listOf(dev1.copy(name = "Renamed"))
+        runCurrent()
+        assertEquals(1, snapshots.size)
+
+        // Advance past polling interval -> triggers second poll
+        fakeHttpClient.checkConnectionMap[dev1.ip] = false
+        advanceTimeBy(5000L)
+        runCurrent()
+        assertEquals(2, snapshots.size)
+        assertEquals(mapOf(dev1.ip to false), client.reachabilityFlow.value)
+
+        // Replace device list -> immediately probes new IP and prunes old IP
+        devicesFlow.value = listOf(dev2)
+        runCurrent()
+        assertEquals(3, snapshots.size)
+        assertEquals(mapOf(dev2.ip to false), client.reachabilityFlow.value)
+
+        pollJob.cancel()
+        val countAfterCancel = fakeHttpClient.checkConnectionCalls.size
+        advanceTimeBy(15000L)
+        runCurrent()
+        assertEquals(countAfterCancel, fakeHttpClient.checkConnectionCalls.size)
+    }
+
+    @Test
+    fun singleton_collapsesInitializeAndInitDiscoveryMethods() {
+        val companionMethods = DefaultWledControllerClient.Companion::class.java.declaredMethods.map { it.name }
+        assertFalse("initialize must be collapsed into getInstance(context)", companionMethods.contains("initialize"))
+        assertFalse("initDiscovery must be collapsed into getInstance(context)", companionMethods.contains("initDiscovery"))
     }
 }

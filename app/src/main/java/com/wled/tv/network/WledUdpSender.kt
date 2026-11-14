@@ -35,7 +35,7 @@ internal open class WledUdpSender {
             protocol = device.protocol,
             wirePayload = wirePayload,
             ledCount = ledCount,
-            isRgbw = device.calibration.isRgbw,
+            isRgbw = device.isRgbw,
             timeoutSeconds = timeoutSeconds
         )
     }

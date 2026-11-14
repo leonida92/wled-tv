@@ -1,21 +1,25 @@
 package com.wled.tv.ui
 
 import android.app.AlertDialog
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.provider.Settings
 import android.view.KeyEvent
 import android.view.View
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import com.wled.tv.BuildConfig
 import com.wled.tv.R
@@ -24,6 +28,7 @@ import com.wled.tv.model.WledConfig
 import com.wled.tv.service.AmbientCaptureService
 import com.wled.tv.updater.GitHubUpdateManager
 import com.wled.tv.updater.UpdateInfo
+import java.io.File
 
 class SystemSettingsActivity : AppCompatActivity() {
 
@@ -47,6 +52,9 @@ class SystemSettingsActivity : AppCompatActivity() {
     private lateinit var tvOverlaySettingStatus: TextView
 
     private lateinit var itemAdbPermissionSetting: LinearLayout
+
+    private lateinit var itemExportConfig: LinearLayout
+    private lateinit var itemImportConfig: LinearLayout
 
     private lateinit var itemCheckUpdateSetting: LinearLayout
     private lateinit var tvAppVersionSummary: TextView
@@ -82,6 +90,9 @@ class SystemSettingsActivity : AppCompatActivity() {
         tvOverlaySettingStatus = findViewById(R.id.tvOverlaySettingStatus)
 
         itemAdbPermissionSetting = findViewById(R.id.itemAdbPermissionSetting)
+
+        itemExportConfig = findViewById(R.id.itemExportConfig)
+        itemImportConfig = findViewById(R.id.itemImportConfig)
 
         itemCheckUpdateSetting = findViewById(R.id.itemCheckUpdateSetting)
         tvAppVersionSummary = findViewById(R.id.tvAppVersionSummary)
@@ -129,6 +140,14 @@ class SystemSettingsActivity : AppCompatActivity() {
 
         itemAdbPermissionSetting.setOnClickListener {
             showAdbPermissionDialog()
+        }
+
+        itemExportConfig.setOnClickListener {
+            exportConfiguration()
+        }
+
+        itemImportConfig.setOnClickListener {
+            showImportDialog()
         }
 
         itemCheckUpdateSetting.setOnClickListener { performUpdateCheck() }
@@ -199,13 +218,13 @@ adb shell appops set com.wled.tv PROJECT_MEDIA default
 
     private fun cycleFps() {
         lifecycleScope.launch {
-            config = configRepo.updateConfig { current ->
-                val nextFps = when (current.calibration.fps) {
+            config = configRepo.updateCaptureSettings { cap ->
+                val nextFps = when (cap.fps) {
                     15 -> 30
                     30 -> 60
                     else -> 15
                 }
-                current.copy(calibration = current.calibration.copy(fps = nextFps))
+                cap.copy(fps = nextFps)
             }
             updateUiValues()
         }
@@ -213,18 +232,16 @@ adb shell appops set com.wled.tv PROJECT_MEDIA default
 
     private fun cycleResolution() {
         lifecycleScope.launch {
-            config = configRepo.updateConfig { current ->
-                val (nextWidth, nextHeight) = when (current.calibration.captureWidth) {
+            config = configRepo.updateCaptureSettings { cap ->
+                val (nextWidth, nextHeight) = when (cap.captureWidth) {
                     80 -> Pair(160, 90)
                     160 -> Pair(320, 180)
                     320 -> Pair(480, 270)
                     else -> Pair(80, 45)
                 }
-                current.copy(
-                    calibration = current.calibration.copy(
-                        captureWidth = nextWidth,
-                        captureHeight = nextHeight
-                    )
+                cap.copy(
+                    captureWidth = nextWidth,
+                    captureHeight = nextHeight
                 )
             }
             updateUiValues()
@@ -241,8 +258,8 @@ adb shell appops set com.wled.tv PROJECT_MEDIA default
     }
 
     private fun updateUiValues() {
-        tvSystemFpsValue.text = "${config.calibration.fps} FPS"
-        tvSystemResolutionValue.text = config.calibration.resolutionLabel
+        tvSystemFpsValue.text = "${config.capture.fps} FPS"
+        tvSystemResolutionValue.text = config.capture.resolutionLabel
         tvAppVersionSummary.text = "Current Version: v${BuildConfig.VERSION_NAME}"
 
         if (config.autoStartOnBoot) {
@@ -336,6 +353,115 @@ adb shell appops set com.wled.tv PROJECT_MEDIA default
                     "Failed to download update APK. Please check your network connection.",
                     Toast.LENGTH_LONG
                 ).show()
+            }
+        }
+    }
+
+    private fun backupDirectories(): Pair<File?, File> {
+        val primaryDir = try {
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        } catch (_: Exception) {
+            null
+        }
+        val fallbackDir = getExternalFilesDir(null) ?: filesDir
+        return primaryDir to fallbackDir
+    }
+
+    private fun exportConfiguration() {
+        lifecycleScope.launch {
+            try {
+                val (primaryDir, fallbackDir) = backupDirectories()
+                val result = configRepo.exportBackup(primaryDir, fallbackDir)
+
+                AlertDialog.Builder(this@SystemSettingsActivity)
+                    .setTitle("Configuration Exported")
+                    .setMessage("Saved to:\n${result.file.absolutePath}\n\nJSON:\n${result.json}")
+                    .setPositiveButton("OK", null)
+                    .setNeutralButton("Copy JSON") { _, _ ->
+                        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                        clipboard?.setPrimaryClip(ClipData.newPlainText("WLED TV Backup", result.json))
+                        Toast.makeText(this@SystemSettingsActivity, "JSON copied to clipboard", Toast.LENGTH_SHORT).show()
+                    }
+                    .show()
+            } catch (e: Exception) {
+                Toast.makeText(this@SystemSettingsActivity, "Failed to export config: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun showImportDialog() {
+        lifecycleScope.launch {
+            val (primaryDir, fallbackDir) = backupDirectories()
+            val backupFile = configRepo.findBackupFile(primaryDir, fallbackDir)
+
+            if (backupFile != null) {
+                AlertDialog.Builder(this@SystemSettingsActivity)
+                    .setTitle("Import Configuration")
+                    .setMessage("Backup file found at:\n${backupFile.absolutePath}\n\nChoose an import source:")
+                    .setPositiveButton("Import from File") { _, _ ->
+                        lifecycleScope.launch {
+                            val success = configRepo.importBackupFromFile(backupFile)
+                            if (success) {
+                                config = configRepo.currentConfig
+                                updateUiValues()
+                                Toast.makeText(this@SystemSettingsActivity, "Configuration imported successfully", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(this@SystemSettingsActivity, "Invalid configuration format or version", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    }
+                    .setNeutralButton("Paste JSON") { _, _ ->
+                        showPasteJsonDialog()
+                    }
+                    .setNegativeButton("Cancel", null)
+                    .show()
+            } else {
+                AlertDialog.Builder(this@SystemSettingsActivity)
+                    .setTitle("Import Configuration")
+                    .setMessage("No backup file (${ConfigRepository.BACKUP_FILENAME}) found.\n\nWould you like to paste configuration JSON manually?")
+                    .setPositiveButton("Paste JSON") { _, _ ->
+                        showPasteJsonDialog()
+                    }
+                    .setNegativeButton("Cancel", null)
+                    .show()
+            }
+        }
+    }
+
+    private fun showPasteJsonDialog() {
+        val input = EditText(this).apply {
+            hint = "Paste exported JSON here"
+            setLines(6)
+            isSingleLine = false
+            setTextColor(Color.parseColor("#F8FAFC"))
+            setHintTextColor(Color.parseColor("#64748B"))
+            setPadding(32, 24, 32, 24)
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Paste Configuration JSON")
+            .setView(input)
+            .setPositiveButton("Import") { _, _ ->
+                val json = input.text.toString().trim()
+                if (json.isNotEmpty()) {
+                    performImport(json)
+                } else {
+                    Toast.makeText(this, "JSON input cannot be empty", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun performImport(json: String) {
+        lifecycleScope.launch {
+            val success = configRepo.importConfig(json)
+            if (success) {
+                config = configRepo.currentConfig
+                updateUiValues()
+                Toast.makeText(this@SystemSettingsActivity, "Configuration imported successfully", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this@SystemSettingsActivity, "Invalid configuration format or version", Toast.LENGTH_LONG).show()
             }
         }
     }

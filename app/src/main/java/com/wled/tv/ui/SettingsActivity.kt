@@ -22,9 +22,10 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var configRepo: ConfigRepository
     private var config: WledConfig = WledConfig()
     private var targetDeviceId: String? = null
+    private var draftDevice: WledDevice? = null
 
     private val targetDevice: WledDevice
-        get() = if (targetDeviceId != null) {
+        get() = draftDevice ?: if (targetDeviceId != null) {
             config.devices.firstOrNull { it.id == targetDeviceId } ?: config.primaryDevice
         } else {
             config.primaryDevice
@@ -51,6 +52,15 @@ class SettingsActivity : AppCompatActivity() {
         setContentView(R.layout.activity_settings)
 
         targetDeviceId = intent.getStringExtra(EXTRA_DEVICE_ID)
+        draftDevice = (savedInstanceState?.getString(EXTRA_DEVICE_DRAFT_JSON)
+            ?: intent.getStringExtra(EXTRA_DEVICE_DRAFT_JSON))?.let { json ->
+            ConfigRepository.decodeDeviceJson(json)
+        }
+        draftDevice?.let { restored ->
+            if (savedInstanceState != null) {
+                setResult(RESULT_OK, Intent().putExtra(EXTRA_DEVICE_DRAFT_JSON, ConfigRepository.encodeDeviceJson(restored)))
+            }
+        }
         configRepo = ConfigRepository.getInstance(this)
         config = configRepo.currentConfig
 
@@ -59,10 +69,17 @@ class SettingsActivity : AppCompatActivity() {
         updateUiValues()
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        draftDevice?.let { outState.putString(EXTRA_DEVICE_DRAFT_JSON, ConfigRepository.encodeDeviceJson(it)) }
+    }
+
     override fun onResume() {
         super.onResume()
-        config = configRepo.currentConfig
-        updateUiValues()
+        if (draftDevice == null) {
+            config = configRepo.currentConfig
+            updateUiValues()
+        }
     }
 
     private fun bindViews() {
@@ -132,6 +149,18 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun updateTargetPerimeter(transform: (PerimeterConfig) -> PerimeterConfig) {
+        val currentDraft = draftDevice
+        if (currentDraft != null) {
+            val updated = currentDraft.copy(perimeter = transform(currentDraft.perimeter))
+            draftDevice = updated
+            setResult(
+                RESULT_OK,
+                Intent().putExtra(EXTRA_DEVICE_DRAFT_JSON, ConfigRepository.encodeDeviceJson(updated))
+            )
+            updateUiValues()
+            return
+        }
+
         lifecycleScope.launch {
             config = configRepo.updateConfig { current ->
                 val targetId = targetDeviceId

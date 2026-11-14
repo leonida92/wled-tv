@@ -1,5 +1,8 @@
 package com.wled.tv.model
 
+/**
+ * Optical color curve, gain, gamma, luminance cutoff, and temporal smoothing parameters.
+ */
 data class ColorCalibration(
     val saturation: Float = 1.6f,        // Saturation boost multiplier (0.5x to 3.0x)
     val contrast: Float = 1.0f,          // Contrast multiplier (0.5x to 1.5x)
@@ -11,19 +14,5 @@ data class ColorCalibration(
     val gammaR: Float = 1.0f,            // Red gamma curve (0.5 to 2.5)
     val gammaG: Float = 1.0f,            // Green gamma curve (0.5 to 2.5)
     val gammaB: Float = 1.0f,            // Blue gamma curve (0.5 to 2.5)
-    val colorOrder: String = "RGB",      // Byte layout: RGB, GRB, BRG, BGR, RBG, GBR
-    val isRgbw: Boolean = false,         // True if physical strip is SK6812 RGBW (4 channels)
-    val rgbwMode: String = "AUTO_SUBTRACT", // White gamut mode: AUTO_SUBTRACT, AUTO_ADD, OFF
-    val smoothingFactor: Float = 0.40f,  // EMA smoothing factor (0.1 = heavy smooth, 1.0 = instant)
-    val fps: Int = 60,                   // Target capture frame rate (15, 30, 60)
-    val captureWidth: Int = 320,         // Capture buffer width (160, 320, 480)
-    val captureHeight: Int = 180         // Capture buffer height (90, 180, 270)
-) {
-    val resolutionLabel: String
-        get() = when (captureWidth) {
-            80 -> "80x45 (Ultra)"
-            160 -> "160x90 (Eco)"
-            480 -> "480x270 (High)"
-            else -> "320x180 (Std)"
-        }
-}
+    val smoothingFactor: Float = 0.40f   // EMA smoothing factor (0.1 = heavy smooth, 1.0 = instant)
+)

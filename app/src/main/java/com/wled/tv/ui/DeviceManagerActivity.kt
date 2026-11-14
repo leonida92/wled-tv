@@ -2,7 +2,6 @@ package com.wled.tv.ui
 
 import android.app.AlertDialog
 import android.content.Intent
-import android.content.res.ColorStateList
 import android.graphics.Color
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -13,27 +12,27 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import com.wled.tv.R
 import com.wled.tv.data.ConfigRepository
+import com.wled.tv.data.DeviceRemoveResult
+import com.wled.tv.data.DeviceToggleResult
+import com.wled.tv.data.FleetCoordinator
+import com.wled.tv.data.WledFleetCoordinator
 import com.wled.tv.model.DeviceType
 import com.wled.tv.model.WledConfig
 import com.wled.tv.model.WledDevice
 import com.wled.tv.network.DefaultWledControllerClient
-import com.wled.tv.network.DeviceReachabilityCache
-import com.wled.tv.network.DiscoveredWled
-import com.wled.tv.network.WledControllerClient
-import com.wled.tv.network.WledDiscovery
-import kotlinx.coroutines.Dispatchers
+import com.wled.tv.service.AmbientCaptureService
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 class DeviceManagerActivity : AppCompatActivity() {
 
     private lateinit var configRepo: ConfigRepository
+    private lateinit var fleetCoordinator: FleetCoordinator
     private var config: WledConfig = WledConfig()
 
     private lateinit var layoutDeviceList: LinearLayout
@@ -41,39 +40,51 @@ class DeviceManagerActivity : AppCompatActivity() {
     private lateinit var btnDiscoverLan: Button
     private lateinit var btnDone: Button
 
-    private val controllerClient: WledControllerClient = DefaultWledControllerClient.getInstance()
     private var testJob: Job? = null
-    private var pingPollingJob: Job? = null
-    private val deviceReachabilityMap get() = DeviceReachabilityCache.map
+    private var discoverJob: Job? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_device_manager)
 
         configRepo = ConfigRepository.getInstance(this)
+        fleetCoordinator = WledFleetCoordinator(
+            configRepo = configRepo,
+            controllerClient = DefaultWledControllerClient.getInstance(this)
+        )
         config = configRepo.currentConfig
 
         bindViews()
         setupListeners()
         renderDeviceList()
+        setupObservers()
     }
 
-    override fun onResume() {
-        super.onResume()
-        config = configRepo.currentConfig
-        renderDeviceList()
-        startPingPolling()
-    }
-
-    override fun onPause() {
-        super.onPause()
-        pingPollingJob?.cancel()
-        pingPollingJob = null
+    private fun setupObservers() {
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                fleetCoordinator.startReachabilityPolling(this)
+                launch {
+                    configRepo.configFlow.collect { latest ->
+                        config = latest
+                        renderDeviceList()
+                    }
+                }
+                launch {
+                    fleetCoordinator.reachabilityFlow.collect { reachability ->
+                        for (dev in config.devices) {
+                            updateDeviceDot(dev.id, dev.enabled, reachability[dev.ip.trim()])
+                        }
+                    }
+                }
+            }
+        }
     }
 
     override fun onDestroy() {
         super.onDestroy()
         testJob?.cancel()
+        discoverJob?.cancel()
     }
 
     private fun bindViews() {
@@ -99,35 +110,9 @@ class DeviceManagerActivity : AppCompatActivity() {
         }
     }
 
-    private fun startPingPolling() {
-        pingPollingJob?.cancel()
-        pingPollingJob = lifecycleScope.launch {
-            while (isActive) {
-                for (dev in config.devices) {
-                    launch(Dispatchers.IO) {
-                        val reachable = controllerClient.checkConnection(dev.ip)
-                        deviceReachabilityMap[dev.id] = reachable
-                        withContext(Dispatchers.Main) {
-                            updateDeviceDot(dev.id, dev.enabled, reachable)
-                        }
-                    }
-                }
-                delay(5000)
-            }
-        }
-    }
-
     private fun updateDeviceDot(deviceId: String, enabled: Boolean, reachable: Boolean?) {
         val viewDot = layoutDeviceList.findViewWithTag<View>("dot_$deviceId") ?: return
-        if (!enabled) {
-            viewDot.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#475569"))
-        } else {
-            when (reachable) {
-                true -> viewDot.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#00E676"))
-                false -> viewDot.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#EF4444"))
-                null -> viewDot.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#64748B"))
-            }
-        }
+        viewDot.backgroundTintList = reachabilityDotTint(enabled, reachable)
     }
 
     private fun renderDeviceList() {
@@ -155,62 +140,36 @@ class DeviceManagerActivity : AppCompatActivity() {
             } else {
                 "${device.totalLeds} LEDs"
             }
-            tvDetails.text = "${device.ip}:${device.port} | $extraDetails | ${device.calibration.colorOrder} | Bri: $briPct%"
+            tvDetails.text = "${device.ip}:${device.port} | $extraDetails | ${device.colorOrder} | Bri: $briPct%"
 
             viewDot.tag = "dot_${device.id}"
+            val reachability = fleetCoordinator.reachabilityFlow.value[device.ip.trim()]
+            viewDot.backgroundTintList = reachabilityDotTint(device.enabled, reachability)
 
             if (!device.enabled) {
-                viewDot.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#475569"))
                 btnToggle.text = "OFF"
                 btnToggle.setTextColor(Color.parseColor("#94A3B8"))
             } else {
-                when (deviceReachabilityMap[device.id]) {
-                    true -> viewDot.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#00E676"))
-                    false -> viewDot.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#EF4444"))
-                    null -> viewDot.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#64748B"))
-                }
                 btnToggle.text = "ON"
                 btnToggle.setTextColor(Color.parseColor("#00E676"))
             }
 
             btnToggle.setOnClickListener {
                 val targetId = device.id
+                val streamingActive =
+                    AmbientCaptureService.activeEngine.value != null || AmbientCaptureService.isRunning.value
                 lifecycleScope.launch {
-                    var newEnabledState = false
-                    var targetDevice: WledDevice? = null
-                    config = configRepo.updateConfig { current ->
-                        val target = current.devices.firstOrNull { it.id == targetId }
-                        if (target != null) {
-                            val newEnabled = !target.enabled
-                            newEnabledState = newEnabled
-                            val updated = target.copy(enabled = newEnabled)
-                            targetDevice = updated
-                            current.updateDevice(updated)
+                    val result = fleetCoordinator.toggleDeviceEnabled(targetId, streamingActive)
+                    if (result is DeviceToggleResult.Toggled) {
+                        val updated = result.device
+                        if (updated.enabled) {
+                            btnToggle.text = "ON"
+                            btnToggle.setTextColor(Color.parseColor("#00E676"))
+                            updateDeviceDot(updated.id, true, result.isReachable)
                         } else {
-                            current
-                        }
-                    }
-                    val updatedDevice = targetDevice ?: return@launch
-                    if (newEnabledState) {
-                        btnToggle.text = "ON"
-                        btnToggle.setTextColor(Color.parseColor("#00E676"))
-                        updateDeviceDot(updatedDevice.id, true, deviceReachabilityMap[updatedDevice.id])
-                    } else {
-                        btnToggle.text = "OFF"
-                        btnToggle.setTextColor(Color.parseColor("#94A3B8"))
-                        updateDeviceDot(updatedDevice.id, false, null)
-                    }
-
-                    lifecycleScope.launch(Dispatchers.IO) {
-                        if (newEnabledState) {
-                            val reachable = controllerClient.checkConnection(updatedDevice.ip)
-                            deviceReachabilityMap[updatedDevice.id] = reachable
-                            withContext(Dispatchers.Main) {
-                                updateDeviceDot(updatedDevice.id, true, reachable)
-                            }
-                            controllerClient.wakeAndSetBrightness(updatedDevice)
-                        } else {
-                            controllerClient.blackoutFleet(listOf(updatedDevice), sendPowerOff = true)
+                            btnToggle.text = "OFF"
+                            btnToggle.setTextColor(Color.parseColor("#94A3B8"))
+                            updateDeviceDot(updated.id, false, null)
                         }
                     }
                 }
@@ -238,12 +197,19 @@ class DeviceManagerActivity : AppCompatActivity() {
                         .setPositiveButton("Remove") { _, _ ->
                             val targetId = device.id
                             lifecycleScope.launch {
-                                config = configRepo.updateConfig { current ->
-                                    current.copy(devices = current.devices.filterNot { it.id == targetId })
-                                }
-                                renderDeviceList()
-                                lifecycleScope.launch(Dispatchers.IO) {
-                                    controllerClient.blackoutFleet(listOf(device), sendPowerOff = true)
+                                when (fleetCoordinator.removeDevice(targetId)) {
+                                    is DeviceRemoveResult.Removed -> {
+                                        config = configRepo.currentConfig
+                                        renderDeviceList()
+                                    }
+                                    is DeviceRemoveResult.RejectedLastDevice -> {
+                                        Toast.makeText(
+                                            this@DeviceManagerActivity,
+                                            "At least one light fixture must remain configured.",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                    is DeviceRemoveResult.NotFound -> Unit
                                 }
                             }
                         }
@@ -261,11 +227,11 @@ class DeviceManagerActivity : AppCompatActivity() {
         Toast.makeText(this, "Identifying ${device.name} (${device.ip})...", Toast.LENGTH_SHORT).show()
 
         testJob = lifecycleScope.launch {
-            controllerClient.flashDevice(device)
-            if (device.enabled) {
-                controllerClient.wakeAndSetBrightness(device)
-            } else {
-                controllerClient.turnOff(device.ip)
+            val overrideSession = AmbientCaptureService.activeEngine.value?.acquireDiagnosticOverride()
+            try {
+                fleetCoordinator.identifyDevice(device)
+            } finally {
+                overrideSession?.close()
             }
         }
     }
@@ -289,20 +255,9 @@ class DeviceManagerActivity : AppCompatActivity() {
 
     private fun discoverWledDevices() {
         Toast.makeText(this, "Scanning local network for WLED devices...", Toast.LENGTH_SHORT).show()
-        val found = java.util.concurrent.CopyOnWriteArrayList<DiscoveredWled>()
-        val discovery = WledDiscovery(this)
-
-        lifecycleScope.launch {
-            val job = launch(Dispatchers.IO) {
-                discovery.discoverDevices().collect { device ->
-                    if (found.none { it.ip == device.ip }) {
-                        found.add(device)
-                    }
-                }
-            }
-
-            delay(2500)
-            job.cancel()
+        discoverJob?.cancel()
+        discoverJob = lifecycleScope.launch {
+            val found = fleetCoordinator.discoverDevices()
 
             if (found.isEmpty()) {
                 Toast.makeText(this@DeviceManagerActivity, "No additional WLED devices found via mDNS", Toast.LENGTH_LONG).show()

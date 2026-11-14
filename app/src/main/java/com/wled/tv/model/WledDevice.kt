@@ -24,13 +24,13 @@ data class WledDevice(
     val ledCount: Int = 1,                              // For spot lights / ambient fixtures
     val perimeter: PerimeterConfig = PerimeterConfig(), // For 4-sided perimeter strips
     val calibration: ColorCalibration = ColorCalibration(), // Per-device optical/color calibration
-    val customRect: NormalizedRect = NormalizedRect.FULL // For custom boxes
+    val customRect: NormalizedRect = NormalizedRect.FULL, // For custom boxes
+    val colorOrder: String = "RGB",                     // Byte layout: RGB, GRB, BRG, BGR, RBG, GBR
+    val isRgbw: Boolean = false,                        // True if physical strip is SK6812 RGBW (4 channels)
+    val rgbwMode: String = "AUTO_SUBTRACT"              // White gamut mode: AUTO_SUBTRACT, AUTO_ADD, OFF
 ) {
-    val colorOrder: String
-        get() = calibration.colorOrder
-
     val wireBytesPerLed: Int
-        get() = if (calibration.isRgbw && protocol == StreamingProtocol.DDP) 4 else 3
+        get() = if (isRgbw && protocol == StreamingProtocol.DDP) 4 else 3
 
     val totalLeds: Int
         get() = when (type) {

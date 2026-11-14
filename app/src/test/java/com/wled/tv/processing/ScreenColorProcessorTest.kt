@@ -63,20 +63,38 @@ class ScreenColorProcessorTest {
     }
 
     @Test
-    fun applySmoothing_sceneCutSnapsImmediately() {
+    fun applySmoothing_sceneCutSnapsImmediately_onResponsiveFactor() {
         val processor = ScreenColorProcessor()
         val black = byteArrayOf(0.toByte(), 0.toByte(), 0.toByte())
         val smooth = ByteArray(3)
 
-        processor.applySmoothing("dev1", black, 1, 0.2f, smooth)
+        // Gaming / responsive factor (0.75) accelerates to 0.90 alpha on scene cut
+        processor.applySmoothing("dev1", black, 1, 0.75f, smooth)
 
         // Sudden explosion / scene cut to full white
         val white = byteArrayOf(255.toByte(), 255.toByte(), 255.toByte())
-        processor.applySmoothing("dev1", white, 1, 0.2f, smooth)
+        processor.applySmoothing("dev1", white, 1, 0.75f, smooth)
 
-        // High alpha (0.90) snaps on scene cut
+        // High alpha (0.90) snaps on scene cut in responsive mode
         val r = smooth[0].toInt() and 0xFF
         assertEquals(230, r)
+    }
+
+    @Test
+    fun applySmoothing_sceneCutDampsGracefully_onGentleFactor() {
+        val processor = ScreenColorProcessor()
+        val black = byteArrayOf(0.toByte(), 0.toByte(), 0.toByte())
+        val smooth = ByteArray(3)
+
+        // Cinema / gentle factor (0.35) bounds acceleration to prevent strobe flicker
+        processor.applySmoothing("dev1", black, 1, 0.35f, smooth)
+
+        val white = byteArrayOf(255.toByte(), 255.toByte(), 255.toByte())
+        processor.applySmoothing("dev1", white, 1, 0.35f, smooth)
+
+        val r = smooth[0].toInt() and 0xFF
+        // With maxAlpha ~0.55f, 255 * 0.55 = ~140, preventing a 90% blinding flash in 1 tick
+        assertTrue("Gentle mode must bound 1-tick transition ($r) to prevent blinding strobe", r in 100..160)
     }
 
     @Test
@@ -607,11 +625,9 @@ class ScreenColorProcessorTest {
             id = "test_dev",
             type = DeviceType.LEFT_AMBIENT,
             ledCount = 2,
-            calibration = ColorCalibration(
-                colorOrder = "GRB",
-                isRgbw = true,
-                rgbwMode = "AUTO_SUBTRACT"
-            )
+            colorOrder = "GRB",
+            isRgbw = true,
+            rgbwMode = "AUTO_SUBTRACT"
         )
         val source = byteArrayOf(
             200.toByte(), 100.toByte(), 50.toByte(),
@@ -643,14 +659,16 @@ class ScreenColorProcessorTest {
             type = DeviceType.LEFT_AMBIENT,
             protocol = StreamingProtocol.DRGB,
             ledCount = 1,
-            calibration = ColorCalibration(isRgbw = true, colorOrder = "RGB")
+            colorOrder = "RGB",
+            isRgbw = true
         )
         val ddpDevice = WledDevice(
             id = "test_ddp",
             type = DeviceType.LEFT_AMBIENT,
             protocol = StreamingProtocol.DDP,
             ledCount = 1,
-            calibration = ColorCalibration(isRgbw = true, colorOrder = "RGB")
+            colorOrder = "RGB",
+            isRgbw = true
         )
         val source = byteArrayOf(255.toByte(), 255.toByte(), 255.toByte())
         val outDrgb = ByteArray(3)

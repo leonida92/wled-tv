@@ -25,26 +25,21 @@ import com.wled.tv.R
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import com.wled.tv.data.ConfigRepository
+import com.wled.tv.data.FleetCoordinator
+import com.wled.tv.data.WledFleetCoordinator
 import com.wled.tv.engine.AmbientStreamingEngine
+import com.wled.tv.engine.DiagnosticStreamCoordinator
 import com.wled.tv.model.DeviceThroughputStats
 import com.wled.tv.model.DeviceType
+import com.wled.tv.model.PresetProfile
 import com.wled.tv.model.ThroughputStats
 import com.wled.tv.model.WledConfig
 import com.wled.tv.model.WledDevice
-import com.wled.tv.network.DeviceReachabilityCache
 import com.wled.tv.network.DefaultWledControllerClient
-import com.wled.tv.network.WledControllerClient
-import com.wled.tv.processing.ScreenColorProcessor
-
 import com.wled.tv.service.AmbientCaptureService
 import com.wled.tv.ui.views.PerformanceHistoryChartView
 import com.wled.tv.ui.views.TvPerimeterPreviewView
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.util.Locale
 
 
@@ -53,10 +48,16 @@ class MainActivity : AppCompatActivity(),
     AmbientStreamingEngine.ThroughputListener {
 
     private lateinit var configRepo: ConfigRepository
+    private lateinit var fleetCoordinator: FleetCoordinator
     private var activeEngine: AmbientStreamingEngine? = null
     private var config: WledConfig = WledConfig()
 
-    private val controllerClient: WledControllerClient = DefaultWledControllerClient.getInstance()
+    private val diagnosticCoordinator: DiagnosticStreamCoordinator = DiagnosticStreamCoordinator(
+        engineProvider = { AmbientCaptureService.activeEngine.value }
+    )
+    private val previewBufferLock = Any()
+    private val previewStagingBuffers = HashMap<String, ByteArray>()
+    private val previewStagingCounts = HashMap<String, Int>()
 
 
     private lateinit var btnPower: FrameLayout
@@ -69,6 +70,9 @@ class MainActivity : AppCompatActivity(),
     private lateinit var viewThroughputDot: View
     private lateinit var tvThroughputText: TextView
 
+    private lateinit var btnPresetPill: LinearLayout
+    private lateinit var tvPresetText: TextView
+
     private lateinit var btnToggleOverlay: LinearLayout
     private lateinit var tvToggleOverlayText: TextView
     private lateinit var btnTestStrip: LinearLayout
@@ -79,11 +83,6 @@ class MainActivity : AppCompatActivity(),
     private var throughputDialog: androidx.appcompat.app.AlertDialog? = null
     private var currentDialogView: View? = null
     private var selectedWindowSeconds = 300
-
-    private var isTesting = false
-    private var testPatternJob: Job? = null
-    private var pingPollingJob: Job? = null
-    private val deviceReachabilityMap get() = DeviceReachabilityCache.map
 
     private val screenCaptureLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -100,15 +99,22 @@ class MainActivity : AppCompatActivity(),
         setContentView(R.layout.activity_main)
 
         configRepo = ConfigRepository.getInstance(this)
+        fleetCoordinator = WledFleetCoordinator(
+            configRepo = configRepo,
+            controllerClient = DefaultWledControllerClient.getInstance(this)
+        )
         config = configRepo.currentConfig
+        diagnosticCoordinator.liveFrameListener = this
+        diagnosticCoordinator.updateConfig(config)
 
         bindViews()
         setupListeners()
         renderDeviceDock()
         updateUiState()
+        updatePresetPill()
         setupObservers()
 
-        if (intent.getBooleanExtra("EXTRA_AUTO_START_TRIGGERED", false) && !AmbientCaptureService.isRunning) {
+        if (intent.getBooleanExtra("EXTRA_AUTO_START_TRIGGERED", false) && !AmbientCaptureService.isRunning.value) {
             intent.removeExtra("EXTRA_AUTO_START_TRIGGERED")
             requestScreenCapture()
         }
@@ -117,11 +123,27 @@ class MainActivity : AppCompatActivity(),
     private fun setupObservers() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
+                fleetCoordinator.startReachabilityPolling(this)
                 launch {
                     configRepo.configFlow.collect { newConfig ->
                         config = newConfig
+                        diagnosticCoordinator.updateConfig(newConfig)
                         renderDeviceDock()
                         tvPreviewView.updateDevices(newConfig.devices)
+                        updateUiState()
+                        updatePresetPill()
+                    }
+                }
+                launch {
+                    fleetCoordinator.reachabilityFlow.collect { reachability ->
+                        for (dev in config.devices) {
+                            updateDeviceDockDot(dev.id, dev.enabled, reachability[dev.ip.trim()])
+                        }
+                        updateUiState()
+                    }
+                }
+                launch {
+                    AmbientCaptureService.isRunning.collect {
                         updateUiState()
                     }
                 }
@@ -157,7 +179,7 @@ class MainActivity : AppCompatActivity(),
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        if (intent.getBooleanExtra("EXTRA_AUTO_START_TRIGGERED", false) && !AmbientCaptureService.isRunning) {
+        if (intent.getBooleanExtra("EXTRA_AUTO_START_TRIGGERED", false) && !AmbientCaptureService.isRunning.value) {
             intent.removeExtra("EXTRA_AUTO_START_TRIGGERED")
             requestScreenCapture()
         }
@@ -166,24 +188,27 @@ class MainActivity : AppCompatActivity(),
     override fun onResume() {
         super.onResume()
         config = configRepo.currentConfig
+        diagnosticCoordinator.updateConfig(config)
         renderDeviceDock()
         tvPreviewView.updateDevices(config.devices)
+        updatePresetPill()
         val currentEngine = activeEngine ?: AmbientCaptureService.activeEngine.value
-        if (currentEngine != null || AmbientCaptureService.isRunning) {
+        if (currentEngine != null || AmbientCaptureService.isRunning.value) {
             tvPreviewView.setLiveActive(true)
             currentEngine?.liveFrameListener = this
             currentEngine?.throughputListener = this
             btnThroughputPill.visibility = View.VISIBLE
             currentEngine?.latestStats?.let { updateThroughputUi(it) }
         } else {
-            tvPreviewView.setLiveActive(false)
-            tvPreviewView.clearLiveColors()
+            tvPreviewView.setLiveActive(diagnosticCoordinator.isRunning)
+            if (!diagnosticCoordinator.isRunning) {
+                tvPreviewView.clearLiveColors()
+            }
             currentEngine?.liveFrameListener = null
             currentEngine?.throughputListener = null
             btnThroughputPill.visibility = View.GONE
         }
         updateUiState()
-        startPingPolling()
     }
 
     override fun onPause() {
@@ -193,9 +218,9 @@ class MainActivity : AppCompatActivity(),
         currentDialogView = null
         activeEngine?.liveFrameListener = null
         activeEngine?.throughputListener = null
-        stopTestPattern()
-        pingPollingJob?.cancel()
-        pingPollingJob = null
+        if (diagnosticCoordinator.isRunning) {
+            stopTestPattern()
+        }
     }
 
     override fun onDestroy() {
@@ -214,6 +239,9 @@ class MainActivity : AppCompatActivity(),
         viewThroughputDot = findViewById(R.id.viewThroughputDot)
         tvThroughputText = findViewById(R.id.tvThroughputText)
 
+        btnPresetPill = findViewById(R.id.btnPresetPill)
+        tvPresetText = findViewById(R.id.tvPresetText)
+
         btnToggleOverlay = findViewById(R.id.btnToggleOverlay)
         tvToggleOverlayText = findViewById(R.id.tvToggleOverlayText)
         btnTestStrip = findViewById(R.id.btnTestStrip)
@@ -226,7 +254,7 @@ class MainActivity : AppCompatActivity(),
 
     private fun setupListeners() {
         btnPower.setOnClickListener {
-            if (AmbientCaptureService.isRunning) {
+            if (AmbientCaptureService.isRunning.value) {
                 stopAmbientService()
             } else {
                 requestScreenCapture()
@@ -235,6 +263,10 @@ class MainActivity : AppCompatActivity(),
 
         btnThroughputPill.setOnClickListener {
             showThroughputDetailsDialog()
+        }
+
+        btnPresetPill.setOnClickListener {
+            showPresetPickerDialog()
         }
 
         btnToggleOverlay.setOnClickListener {
@@ -272,15 +304,12 @@ class MainActivity : AppCompatActivity(),
 
             dot.tag = "dot_${device.id}"
 
-            if (!device.enabled) {
-                dot.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#475569"))
+            val reachability = if (::fleetCoordinator.isInitialized) {
+                fleetCoordinator.reachabilityFlow.value[device.ip.trim()]
             } else {
-                when (deviceReachabilityMap[device.id]) {
-                    true -> dot.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#00E676"))
-                    false -> dot.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#EF4444"))
-                    null -> dot.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#64748B"))
-                }
+                null
             }
+            dot.backgroundTintList = reachabilityDotTint(device.enabled, reachability)
 
             card.setOnFocusChangeListener { view, hasFocus ->
                 view.animate()
@@ -322,48 +351,14 @@ class MainActivity : AppCompatActivity(),
 
     private fun updateDeviceDockDot(deviceId: String, enabled: Boolean, reachable: Boolean?) {
         val dot = layoutDeviceDock.findViewWithTag<View>("dot_$deviceId") ?: return
-        if (!enabled) {
-            dot.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#475569"))
-        } else {
-            when (reachable) {
-                true -> dot.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#00E676"))
-                false -> dot.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#EF4444"))
-                null -> dot.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#64748B"))
-            }
-        }
+        dot.backgroundTintList = reachabilityDotTint(enabled, reachable)
     }
 
     private fun toggleDeviceEnabled(device: WledDevice, @Suppress("UNUSED_PARAMETER") position: Int) {
-        val newEnabled = !device.enabled
-        val updatedDevice = device.copy(enabled = newEnabled)
-
+        val streamingActive = activeEngine != null || AmbientCaptureService.isRunning.value
         lifecycleScope.launch {
-            configRepo.updateConfig { cur ->
-                val list = cur.devices.toMutableList()
-                val idx = list.indexOfFirst { it.id == device.id }
-                if (idx != -1) {
-                    list[idx] = updatedDevice
-                }
-                cur.copy(devices = list)
-            }
-        }
-
-        lifecycleScope.launch(Dispatchers.IO) {
-            if (newEnabled) {
-                val isReachable = controllerClient.checkConnection(updatedDevice.ip)
-                deviceReachabilityMap[updatedDevice.id] = isReachable
-                withContext(Dispatchers.Main) {
-                    updateDeviceDockDot(updatedDevice.id, true, isReachable)
-                    updateUiState()
-                }
-                controllerClient.wakeAndSetBrightness(updatedDevice)
-            } else {
-                controllerClient.blackoutFleet(listOf(updatedDevice), sendPowerOff = true)
-                withContext(Dispatchers.Main) {
-                    updateDeviceDockDot(updatedDevice.id, false, null)
-                    updateUiState()
-                }
-            }
+            fleetCoordinator.toggleDeviceEnabled(device.id, streamingActive)
+            updateUiState()
         }
     }
 
@@ -405,7 +400,7 @@ class MainActivity : AppCompatActivity(),
             return
         }
 
-        if (!AmbientCaptureService.isRunning) {
+        if (!AmbientCaptureService.isRunning.value) {
             Toast.makeText(this, "Start ambient capture first to view overlay", Toast.LENGTH_SHORT).show()
             return
         }
@@ -428,7 +423,7 @@ class MainActivity : AppCompatActivity(),
     }
 
     private fun toggleTestPattern() {
-        if (isTesting) {
+        if (diagnosticCoordinator.isRunning) {
             stopTestPattern()
         } else {
             startTestPattern()
@@ -436,68 +431,14 @@ class MainActivity : AppCompatActivity(),
     }
 
     private fun startTestPattern() {
-        isTesting = true
-        testPatternJob?.cancel()
-        activeEngine?.isTestingOverride = true
         tvPreviewView.setLiveActive(true)
-
-        testPatternJob = lifecycleScope.launch(Dispatchers.IO) {
-            val devices = config.enabledDevices
-            var step = 0
-            val testBuffers = HashMap<String, ByteArray>()
-            val wireBuffers = HashMap<String, ByteArray>()
-            for (dev in devices) {
-                val leds = dev.totalLeds
-                if (leds > 0) {
-                    testBuffers[dev.id] = ByteArray(leds * 3)
-                    wireBuffers[dev.id] = ByteArray(leds * dev.wireBytesPerLed)
-                }
-            }
-            val hsv = floatArrayOf(0f, 1.0f, 1.0f)
-
-            while (isTesting) {
-                for (dev in devices) {
-                    val leds = dev.totalLeds
-                    if (leds <= 0) continue
-                    val testBuffer = testBuffers[dev.id] ?: continue
-                    val wireBuffer = wireBuffers[dev.id] ?: continue
-
-                    for (i in 0 until leds) {
-                        val idx = i * 3
-                        hsv[0] = ((step * 4 + (i * 360 / leds)) % 360).toFloat()
-                        val rgb = Color.HSVToColor(hsv)
-                        testBuffer[idx] = Color.red(rgb).toByte()
-                        testBuffer[idx + 1] = Color.green(rgb).toByte()
-                        testBuffer[idx + 2] = Color.blue(rgb).toByte()
-                    }
-
-                    ScreenColorProcessor.encodeWireFrame(dev, testBuffer, wireBuffer)
-
-                    controllerClient.sendFrame(
-                        device = dev,
-                        wirePayload = wireBuffer,
-                        ledCount = leds
-                    )
-
-                    launch(Dispatchers.Main) {
-                        if (isTesting) {
-                            tvPreviewView.updateDeviceLiveColors(dev.id, testBuffer, leds)
-                        }
-                    }
-                }
-
-                step = (step + 1) % 360
-                delay(33)
-            }
-        }
+        diagnosticCoordinator.liveFrameListener = this
+        diagnosticCoordinator.updateConfig(config)
+        diagnosticCoordinator.startRainbow(lifecycleScope)
     }
 
     private fun stopTestPattern() {
-        isTesting = false
-        testPatternJob?.cancel()
-        testPatternJob = null
-        activeEngine?.isTestingOverride = false
-        val isRunning = activeEngine != null || AmbientCaptureService.isRunning
+        val isRunning = activeEngine != null || AmbientCaptureService.isRunning.value
         if (isRunning) {
             tvPreviewView.setLiveActive(true)
         } else {
@@ -505,12 +446,8 @@ class MainActivity : AppCompatActivity(),
             tvPreviewView.clearLiveColors()
         }
 
-        turnOffAllLeds()
-    }
-
-    private fun turnOffAllLeds() {
-        lifecycleScope.launch(Dispatchers.IO) {
-            controllerClient.blackoutFleet(config.enabledDevices, sendPowerOff = false)
+        lifecycleScope.launch {
+            diagnosticCoordinator.stopAndBlackout(sendPowerOff = false)
         }
     }
 
@@ -530,12 +467,10 @@ class MainActivity : AppCompatActivity(),
             putExtra(AmbientCaptureService.EXTRA_RESULT_DATA, data)
         }
         startForegroundService(intent)
-        AmbientCaptureService.isRunning = true
         updateUiState()
     }
 
     private fun stopAmbientService() {
-        AmbientCaptureService.isRunning = false
         activeEngine?.liveFrameListener = null
         activeEngine?.throughputListener = null
         btnThroughputPill.visibility = View.GONE
@@ -549,13 +484,18 @@ class MainActivity : AppCompatActivity(),
     }
 
     private fun updateUiState() {
-        val running = activeEngine != null || AmbientCaptureService.isRunning
+        val running = activeEngine != null || AmbientCaptureService.isRunning.value
+        val reachability = if (::fleetCoordinator.isInitialized) {
+            fleetCoordinator.reachabilityFlow.value
+        } else {
+            emptyMap()
+        }
         val pingableActiveCount = config.enabledDevices.count { dev ->
-            deviceReachabilityMap[dev.id] == true
+            reachability[dev.ip.trim()] == true
         }
         val totalEnabled = config.enabledDevices.size
 
-        val hasAnyPingResults = config.enabledDevices.any { deviceReachabilityMap.containsKey(it.id) }
+        val hasAnyPingResults = config.enabledDevices.any { reachability.containsKey(it.ip.trim()) }
 
         if (running) {
             btnPower.setBackgroundResource(R.drawable.bg_power_button_on)
@@ -600,33 +540,29 @@ class MainActivity : AppCompatActivity(),
         updateOverlayButtonState()
     }
 
-    private fun startPingPolling() {
-        pingPollingJob?.cancel()
-        pingPollingJob = lifecycleScope.launch {
-            while (isActive) {
-                val devices = config.devices
-                for (dev in devices) {
-                    launch(Dispatchers.IO) {
-                        val isReachable = controllerClient.checkConnection(dev.ip)
-                        deviceReachabilityMap[dev.id] = isReachable
-                        withContext(Dispatchers.Main) {
-                            updateDeviceDockDot(dev.id, dev.enabled, isReachable)
-                            updateUiState()
+    override fun onDeviceFrameProcessed(deviceId: String, rgb: ByteArray, count: Int) {
+        val isRunning = activeEngine != null || AmbientCaptureService.isRunning.value
+        if ((diagnosticCoordinator.isRunning || isRunning) && tvPreviewView.isLiveActive) {
+            val byteLen = (count * 3).coerceAtMost(rgb.size)
+            synchronized(previewBufferLock) {
+                var buf = previewStagingBuffers[deviceId]
+                if (buf == null || buf.size < byteLen) {
+                    buf = ByteArray(byteLen)
+                    previewStagingBuffers[deviceId] = buf
+                }
+                System.arraycopy(rgb, 0, buf, 0, byteLen)
+                previewStagingCounts[deviceId] = count
+            }
+            runOnUiThread {
+                val activeNow = diagnosticCoordinator.isRunning || activeEngine != null || AmbientCaptureService.isRunning.value
+                if (activeNow && tvPreviewView.isLiveActive) {
+                    synchronized(previewBufferLock) {
+                        val buf = previewStagingBuffers[deviceId]
+                        val stagedCount = previewStagingCounts[deviceId] ?: 0
+                        if (buf != null && stagedCount > 0) {
+                            tvPreviewView.updateDeviceLiveColors(deviceId, buf, stagedCount)
                         }
                     }
-                }
-                delay(5000)
-            }
-        }
-    }
-
-    override fun onDeviceFrameProcessed(deviceId: String, rgb: ByteArray, count: Int) {
-        val isRunning = activeEngine != null || AmbientCaptureService.isRunning
-        if (!isTesting && isRunning && tvPreviewView.isLiveActive) {
-            runOnUiThread {
-                val currentlyRunning = activeEngine != null || AmbientCaptureService.isRunning
-                if (currentlyRunning && tvPreviewView.isLiveActive) {
-                    tvPreviewView.updateDeviceLiveColors(deviceId, rgb, count)
                 }
             }
         }
@@ -634,7 +570,7 @@ class MainActivity : AppCompatActivity(),
 
     override fun onThroughputStatsUpdated(stats: ThroughputStats) {
         runOnUiThread {
-            if (activeEngine != null || AmbientCaptureService.isRunning) {
+            if (activeEngine != null || AmbientCaptureService.isRunning.value) {
                 updateThroughputUi(stats)
                 updateUiState()
                 val dialogView = currentDialogView
@@ -685,7 +621,7 @@ class MainActivity : AppCompatActivity(),
         tvTotalPackets.text = String.format(Locale.US, "%,d packets sent this session", stats.totalPackets)
 
         val history = activeEngine?.getHistorySnapshot(windowSec) ?: emptyList()
-        chart.setData(history, windowSec, config.calibration.fps, config.enabledDevices.size)
+        chart.setData(history, windowSec, config.capture.fps, config.enabledDevices.size)
 
         val summary = chart.getSummaryStats()
         tvChartFpsLegend.text = "Capture FPS: Avg %.1f • Peak %d".format(summary.avgFps, summary.peakFps)
@@ -742,7 +678,7 @@ class MainActivity : AppCompatActivity(),
     private fun showThroughputDetailsDialog() {
         val stats = activeEngine?.latestStats ?: ThroughputStats(
             fps = 0,
-            targetFps = config.calibration.fps,
+            targetFps = config.capture.fps,
             pps = 0,
             totalPackets = 0L,
             deviceStats = emptyList()
@@ -804,5 +740,25 @@ class MainActivity : AppCompatActivity(),
 
         dialog.show()
         btnClose.requestFocus()
+    }
+
+    private fun updatePresetPill() {
+        tvPresetText.text = "Profile: ${config.activeProfile.name}"
+    }
+
+    private fun showPresetPickerDialog() {
+        val presets = PresetProfile.BUILT_INS.filter { it.id != PresetProfile.CUSTOM.id }
+        val names = presets.map { "${it.name} - ${it.description}" }.toTypedArray()
+
+        AlertDialog.Builder(this)
+            .setTitle("Select Profile Preset")
+            .setItems(names) { _, which ->
+                val selected = presets[which]
+                lifecycleScope.launch {
+                    configRepo.applyPreset(selected)
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 }

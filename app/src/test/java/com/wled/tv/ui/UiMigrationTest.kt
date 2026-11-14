@@ -5,13 +5,14 @@ import androidx.arch.core.executor.TaskExecutor
 import com.wled.tv.data.ConfigRepository
 import com.wled.tv.data.InMemoryConfigStorage
 import com.wled.tv.engine.AmbientStreamingEngine
+import com.wled.tv.engine.DiagnosticStreamCoordinator
 import com.wled.tv.model.ColorCalibration
 import com.wled.tv.model.ThroughputStats
 import com.wled.tv.model.WledConfig
 import com.wled.tv.model.WledDevice
 import com.wled.tv.network.DefaultWledControllerClient
+import com.wled.tv.data.FleetCoordinator
 import com.wled.tv.network.FakeWledControllerClient
-import com.wled.tv.network.WledControllerClient
 import com.wled.tv.service.AmbientCaptureService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -138,44 +139,54 @@ class UiMigrationTest {
     }
 
     @Test
-    fun diagnosticTestPattern_setsTestingOverrideOnActiveEngine() {
-        val engine = AmbientStreamingEngine(initialConfig = WledConfig())
+    fun diagnosticTestPattern_setsDiagnosticOverrideOnActiveEngine() = kotlinx.coroutines.test.runTest {
+        val fakeClient = FakeWledControllerClient()
+        val engine = AmbientStreamingEngine(initialConfig = WledConfig(), controllerClient = fakeClient)
         AmbientCaptureService.setActiveEngineForTesting(engine)
 
-        assertFalse(engine.isTestingOverride)
+        val dispatcher = kotlinx.coroutines.test.StandardTestDispatcher(testScheduler)
+        val coordinator = DiagnosticStreamCoordinator(
+            initialConfig = WledConfig(),
+            controllerClient = fakeClient,
+            engineProvider = { AmbientCaptureService.activeEngine.value },
+            ioDispatcher = dispatcher
+        )
+        val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + dispatcher)
 
-        // When starting test pattern
-        val active = AmbientCaptureService.activeEngine.value
-        active?.isTestingOverride = true
+        assertFalse(engine.isDiagnosticActive)
 
-        assertTrue(engine.isTestingOverride)
+        coordinator.startSolidColor(scope, 255, 255, 255, null)
+        assertTrue(engine.isDiagnosticActive)
 
-        // When stopping test pattern
-        active?.isTestingOverride = false
-
-        assertFalse(engine.isTestingOverride)
+        coordinator.stop()
+        assertFalse(engine.isDiagnosticActive)
+        scope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
     }
 
     @Test
-    fun activities_fieldVerification_useSharedControllerClientAndNoRawSockets() {
-        // MainActivity: must use controllerClient and have no raw udpSender or httpClient fields
+    fun activities_fieldVerification_useSharedCoordinators() {
         val mainFields = MainActivity::class.java.declaredFields.map { it.name }
         assertFalse("MainActivity must not declare httpClient", mainFields.contains("httpClient"))
         assertFalse("MainActivity must not declare udpSender", mainFields.contains("udpSender"))
-        assertTrue("MainActivity must declare controllerClient", mainFields.contains("controllerClient"))
-        val mainControllerField = MainActivity::class.java.getDeclaredField("controllerClient")
-        assertTrue(WledControllerClient::class.java.isAssignableFrom(mainControllerField.type))
+        assertFalse("MainActivity must not declare controllerClient", mainFields.contains("controllerClient"))
+        assertTrue("MainActivity must declare diagnosticCoordinator", mainFields.contains("diagnosticCoordinator"))
+        assertTrue("MainActivity must declare fleetCoordinator", mainFields.contains("fleetCoordinator"))
+        val mainDiagField = MainActivity::class.java.getDeclaredField("diagnosticCoordinator")
+        assertTrue(DiagnosticStreamCoordinator::class.java.isAssignableFrom(mainDiagField.type))
+        val mainFleetField = MainActivity::class.java.getDeclaredField("fleetCoordinator")
+        assertTrue(FleetCoordinator::class.java.isAssignableFrom(mainFleetField.type))
 
-        val mainMethods = MainActivity::class.java.declaredMethods.map { it.name }
-        assertTrue("MainActivity must declare turnOffAllLeds", mainMethods.contains("turnOffAllLeds"))
+        val editFields = EditDeviceActivity::class.java.declaredFields.map { it.name }
+        assertTrue("EditDeviceActivity must declare fleetCoordinator", editFields.contains("fleetCoordinator"))
+        val editMethods = EditDeviceActivity::class.java.declaredMethods.map { it.name }
+        assertFalse("EditDeviceActivity must not declare commitDraftChanges", editMethods.contains("commitDraftChanges"))
 
-        // CalibrationActivity: must use controllerClient and have no raw udpSender field
         val calibFields = CalibrationActivity::class.java.declaredFields.map { it.name }
         assertFalse("CalibrationActivity must not declare udpSender", calibFields.contains("udpSender"))
-        assertTrue("CalibrationActivity must declare controllerClient", calibFields.contains("controllerClient"))
-        val calibControllerField = CalibrationActivity::class.java.getDeclaredField("controllerClient")
-        assertTrue(WledControllerClient::class.java.isAssignableFrom(calibControllerField.type))
-
+        assertFalse("CalibrationActivity must not declare controllerClient", calibFields.contains("controllerClient"))
+        assertTrue("CalibrationActivity must declare diagnosticCoordinator", calibFields.contains("diagnosticCoordinator"))
+        val calibCoordinatorField = CalibrationActivity::class.java.getDeclaredField("diagnosticCoordinator")
+        assertTrue(DiagnosticStreamCoordinator::class.java.isAssignableFrom(calibCoordinatorField.type))
     }
 
     @Test
@@ -183,17 +194,44 @@ class UiMigrationTest {
         val fakeClient = FakeWledControllerClient()
         DefaultWledControllerClient.setInstanceForTesting(fakeClient)
         try {
+            val innerClientField = DiagnosticStreamCoordinator::class.java.getDeclaredField("controllerClient").apply { isAccessible = true }
+
             val mainActivity = MainActivity()
-            val mainField = MainActivity::class.java.getDeclaredField("controllerClient").apply { isAccessible = true }
-            assertSame(fakeClient, mainField.get(mainActivity))
+            val mainDiagField = MainActivity::class.java.getDeclaredField("diagnosticCoordinator").apply { isAccessible = true }
+            val mainCoordinator = mainDiagField.get(mainActivity) as DiagnosticStreamCoordinator
+            assertSame(fakeClient, innerClientField.get(mainCoordinator))
 
             val calibActivity = CalibrationActivity()
-            val calibField = CalibrationActivity::class.java.getDeclaredField("controllerClient").apply { isAccessible = true }
-            assertSame(fakeClient, calibField.get(calibActivity))
-
+            val calibCoordField = CalibrationActivity::class.java.getDeclaredField("diagnosticCoordinator").apply { isAccessible = true }
+            val coordinator = calibCoordField.get(calibActivity) as DiagnosticStreamCoordinator
+            assertSame(fakeClient, innerClientField.get(coordinator))
         } finally {
             DefaultWledControllerClient.setInstanceForTesting(null)
         }
+    }
+
+    @Test
+    fun configRepository_deviceDraftCodec_roundtripsWithoutMutatingRepository() {
+        val initialDeviceCount = repo.currentConfig.devices.size
+        val draft = WledDevice(
+            id = "draft-device-1",
+            name = "Draft Accent Strip",
+            ip = "192.168.1.210",
+            port = 4048,
+            protocol = com.wled.tv.model.StreamingProtocol.DDP,
+            enabled = true,
+            type = com.wled.tv.model.DeviceType.LEFT_AMBIENT,
+            ledCount = 24,
+            calibration = ColorCalibration(saturation = 1.9f, maxBrightness = 210, smoothingFactor = 0.25f),
+            colorOrder = "GRB",
+            isRgbw = true,
+            rgbwMode = "AUTO_ADD"
+        )
+        val encoded = ConfigRepository.encodeDeviceJson(draft)
+        val decoded = ConfigRepository.decodeDeviceJson(encoded)
+
+        assertEquals(draft, decoded)
+        assertEquals(initialDeviceCount, repo.currentConfig.devices.size)
     }
 
     @Test
@@ -227,5 +265,44 @@ class UiMigrationTest {
         // 4. Power toggle off
         fakeClient.turnOff(testDevice.ip)
         assertEquals(false, fakeClient.powerState[testDevice.ip])
+    }
+
+    @Test
+    fun ui_presetSwitchingAndCustomAutoTransition_updatesConfig() = runBlocking {
+        val initialConfig = repo.currentConfig
+        assertEquals(com.wled.tv.model.PresetProfile.DEFAULT.id, initialConfig.activeProfileId)
+
+        // Select cinema preset
+        val cinema = com.wled.tv.model.PresetProfile.CINEMA
+        val updated = repo.updateConfig { it.applyPreset(cinema) }
+        assertEquals(cinema.id, updated.activeProfileId)
+        assertEquals(cinema.calibration.saturation, updated.calibration.saturation, 0.01f)
+
+        // Tweak slider -> auto transition to custom
+        val customConfig = repo.updateConfig { cur ->
+            cur.copy(
+                activeProfileId = com.wled.tv.model.PresetProfile.CUSTOM.id,
+                calibration = cur.calibration.copy(saturation = 2.5f)
+            )
+        }
+        assertEquals(com.wled.tv.model.PresetProfile.CUSTOM.id, customConfig.activeProfileId)
+        assertEquals(2.5f, customConfig.calibration.saturation, 0.01f)
+    }
+
+    @Test
+    fun ui_deviceDiscoveryViaControllerClient_delegatesProperly() = runBlocking {
+        val fakeClient = FakeWledControllerClient()
+        DefaultWledControllerClient.setInstanceForTesting(fakeClient)
+
+        val discoveredList = mutableListOf<com.wled.tv.network.DiscoveredWled>()
+        val job = launch(Dispatchers.Unconfined) {
+            fakeClient.discoverDevices().collect { discoveredList.add(it) }
+        }
+
+        fakeClient.discoveryFlow.emit(com.wled.tv.network.DiscoveredWled("WLED-Lamp", "192.168.1.188", 4048))
+        assertEquals(1, discoveredList.size)
+        assertEquals("WLED-Lamp", discoveredList[0].name)
+        assertEquals("192.168.1.188", discoveredList[0].ip)
+        job.cancel()
     }
 }

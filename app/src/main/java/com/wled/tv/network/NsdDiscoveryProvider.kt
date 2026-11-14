@@ -13,15 +13,20 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.resume
 
-class WledDiscovery(context: Context) {
+/**
+ * Production implementation of [WledDiscoveryProvider] wrapping Android's [NsdManager] DNS-SD discovery.
+ * Resolves discovered services sequentially through a Channel to eliminate FAILURE_ALREADY_ACTIVE (code 3).
+ */
+class NsdDiscoveryProvider(context: Context) : WledDiscoveryProvider {
 
-    private val nsdManager = context.getSystemService(Context.NSD_SERVICE) as NsdManager
+    private val nsdManager = context.applicationContext.getSystemService(Context.NSD_SERVICE) as NsdManager
 
     /**
-     * Discovers WLED instances on the local network via mDNS (_wled._tcp or _http._tcp).
+     * Discovers WLED instances on the local network via mDNS (_http._tcp.).
      * Resolves discovered services sequentially through a Channel to eliminate FAILURE_ALREADY_ACTIVE (code 3).
      */
-    fun discoverDevices(): Flow<DiscoveredWled> = callbackFlow {
+    @Suppress("DEPRECATION")
+    override fun discover(): Flow<DiscoveredWled> = callbackFlow {
         val resolveQueue = Channel<NsdServiceInfo>(Channel.UNLIMITED)
 
         val resolverJob = launch {
@@ -116,12 +121,6 @@ class WledDiscovery(context: Context) {
     }
 
     companion object {
-        private const val TAG = "WledDiscovery"
+        private const val TAG = "NsdDiscoveryProvider"
     }
 }
-
-data class DiscoveredWled(
-    val name: String,
-    val ip: String,
-    val port: Int
-)

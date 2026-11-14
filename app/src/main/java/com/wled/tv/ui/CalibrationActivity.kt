@@ -1,5 +1,7 @@
 package com.wled.tv.ui
 
+import android.app.AlertDialog
+import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
 import android.view.KeyEvent
@@ -9,19 +11,14 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import com.wled.tv.R
 import com.wled.tv.data.ConfigRepository
+import com.wled.tv.engine.DiagnosticStreamCoordinator
 import com.wled.tv.model.ColorCalibration
+import com.wled.tv.model.PresetProfile
 import com.wled.tv.model.WledConfig
 import com.wled.tv.model.WledDevice
-import com.wled.tv.network.DefaultWledControllerClient
-import com.wled.tv.network.WledControllerClient
-import com.wled.tv.processing.ScreenColorProcessor
 import com.wled.tv.service.AmbientCaptureService
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -31,9 +28,10 @@ class CalibrationActivity : AppCompatActivity() {
     private lateinit var configRepo: ConfigRepository
     private var config: WledConfig = WledConfig()
     private var targetDeviceId: String? = null
+    private var draftDevice: WledDevice? = null
 
     private val targetDevice: WledDevice
-        get() = if (targetDeviceId != null) {
+        get() = draftDevice ?: if (targetDeviceId != null) {
             config.devices.firstOrNull { it.id == targetDeviceId } ?: config.primaryDevice
         } else {
             config.primaryDevice
@@ -42,7 +40,15 @@ class CalibrationActivity : AppCompatActivity() {
     private val currentCalibration: ColorCalibration
         get() = targetDevice.calibration
 
-    private val controllerClient: WledControllerClient = DefaultWledControllerClient.getInstance()
+    private val diagnosticCoordinator: DiagnosticStreamCoordinator = DiagnosticStreamCoordinator(
+        engineProvider = { AmbientCaptureService.activeEngine.value }
+    )
+
+    private var activePreset: PresetProfile = PresetProfile.DEFAULT
+
+    private lateinit var btnPresetSelector: Button
+    private lateinit var btnResetPreset: Button
+    private lateinit var tvPresetDescription: TextView
 
     private lateinit var viewRefBarTop: View
     private lateinit var viewRefBarBottom: View
@@ -79,9 +85,6 @@ class CalibrationActivity : AppCompatActivity() {
     private lateinit var itemSmoothing: LinearLayout
     private lateinit var tvSmoothingValue: TextView
 
-    private var activeTestColor: Triple<Int, Int, Int>? = null
-    private var testColorJob: Job? = null
-
     private val colorOrders = listOf("RGB", "GRB", "BGR", "BRG", "RBG", "GBR")
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -89,21 +92,53 @@ class CalibrationActivity : AppCompatActivity() {
         setContentView(R.layout.activity_calibration)
 
         targetDeviceId = intent.getStringExtra(EXTRA_DEVICE_ID)
+        draftDevice = (savedInstanceState?.getString(EXTRA_DEVICE_DRAFT_JSON)
+            ?: intent.getStringExtra(EXTRA_DEVICE_DRAFT_JSON))?.let { json ->
+            ConfigRepository.decodeDeviceJson(json)
+        }
         configRepo = ConfigRepository.getInstance(this)
-        config = configRepo.currentConfig
+        val repoConfig = configRepo.currentConfig
+        val initialDraft = draftDevice
+        config = if (initialDraft != null) {
+            targetDeviceId = initialDraft.id
+            if (savedInstanceState != null) {
+                setResult(RESULT_OK, Intent().putExtra(EXTRA_DEVICE_DRAFT_JSON, ConfigRepository.encodeDeviceJson(initialDraft)))
+            }
+            withDraftInConfig(repoConfig, initialDraft)
+        } else {
+            repoConfig
+        }
+        diagnosticCoordinator.updateConfig(config)
+        activePreset = if (config.activeProfile.id == PresetProfile.CUSTOM.id) PresetProfile.DEFAULT else config.activeProfile
 
         bindViews()
         setupListeners()
         updateUiValues()
+
+        lifecycleScope.launch {
+            configRepo.configFlow.collect { latest ->
+                config = draftDevice?.let { withDraftInConfig(latest, it) } ?: latest
+                diagnosticCoordinator.updateConfig(config)
+                updateUiValues()
+            }
+        }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        draftDevice?.let { outState.putString(EXTRA_DEVICE_DRAFT_JSON, ConfigRepository.encodeDeviceJson(it)) }
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        stopTestColorStream()
-
+        diagnosticCoordinator.stop()
     }
 
     private fun bindViews() {
+        btnPresetSelector = findViewById(R.id.btnPresetSelector)
+        btnResetPreset = findViewById(R.id.btnResetPreset)
+        tvPresetDescription = findViewById(R.id.tvPresetDescription)
+
         viewRefBarTop = findViewById(R.id.viewRefBarTop)
         viewRefBarBottom = findViewById(R.id.viewRefBarBottom)
         viewRefBarLeft = findViewById(R.id.viewRefBarLeft)
@@ -143,6 +178,9 @@ class CalibrationActivity : AppCompatActivity() {
     }
 
     private fun setupListeners() {
+        btnPresetSelector.setOnClickListener { showPresetPicker() }
+        btnResetPreset.setOnClickListener { resetToPreset() }
+
         btnColorLive.setOnClickListener { selectColorMode(null, "Live Screen") }
         btnColorWhite.setOnClickListener { selectColorMode(Triple(255, 255, 255), "White (6500K)") }
         btnColorWarm.setOnClickListener { selectColorMode(Triple(255, 190, 120), "Warm White (3200K)") }
@@ -223,15 +261,14 @@ class CalibrationActivity : AppCompatActivity() {
     }
 
     private fun cycleColorOrder(direction: Int) {
-        updateTargetCalibration { c ->
-            val currentIndex = colorOrders.indexOf(c.colorOrder).let { if (it < 0) 0 else it }
+        updateTargetDeviceStrip { dev ->
+            val currentIndex = colorOrders.indexOf(dev.colorOrder).let { if (it < 0) 0 else it }
             val newIndex = (currentIndex + direction + colorOrders.size) % colorOrders.size
-            c.copy(colorOrder = colorOrders[newIndex])
+            dev.copy(colorOrder = colorOrders[newIndex])
         }
     }
 
     private fun selectColorMode(rgb: Triple<Int, Int, Int>?, title: String) {
-        activeTestColor = rgb
         tvActiveColorMode.text = "${targetDevice.name}: $title"
 
         if (rgb == null) {
@@ -239,7 +276,9 @@ class CalibrationActivity : AppCompatActivity() {
             viewRefBarBottom.setBackgroundColor(Color.TRANSPARENT)
             viewRefBarLeft.setBackgroundColor(Color.TRANSPARENT)
             viewRefBarRight.setBackgroundColor(Color.TRANSPARENT)
-            stopTestColorStream()
+            lifecycleScope.launch {
+                diagnosticCoordinator.stopAndBlackout(sendPowerOff = false)
+            }
         } else {
             val colorInt = Color.rgb(rgb.first, rgb.second, rgb.third)
             viewRefBarTop.setBackgroundColor(colorInt)
@@ -247,54 +286,15 @@ class CalibrationActivity : AppCompatActivity() {
             viewRefBarLeft.setBackgroundColor(colorInt)
             viewRefBarRight.setBackgroundColor(colorInt)
 
-            startTestTestColorStream()
+            diagnosticCoordinator.updateConfig(config)
+            diagnosticCoordinator.startSolidColor(
+                scope = lifecycleScope,
+                r = rgb.first,
+                g = rgb.second,
+                b = rgb.third,
+                deviceId = targetDeviceId
+            )
         }
-    }
-
-    private fun startTestTestColorStream() {
-        testColorJob?.cancel()
-        AmbientCaptureService.activeEngine.value?.isTestingOverride = true
-
-        testColorJob = lifecycleScope.launch(Dispatchers.IO) {
-            val dev = targetDevice
-            val leds = dev.totalLeds
-            if (leds <= 0) return@launch
-            val frame = ByteArray(leds * 3)
-            val wireBuffer = ByteArray(leds * dev.wireBytesPerLed)
-
-            while (isActive && activeTestColor != null) {
-                val currentDev = targetDevice
-                val color = activeTestColor ?: break
-                val c = currentDev.calibration
-                val briScale = c.maxBrightness / 255f
-
-                val r = (color.first * c.gainR * briScale).roundToInt().coerceIn(0, 255).toByte()
-                val g = (color.second * c.gainG * briScale).roundToInt().coerceIn(0, 255).toByte()
-                val b = (color.third * c.gainB * briScale).roundToInt().coerceIn(0, 255).toByte()
-
-                for (i in 0 until leds) {
-                    val idx = i * 3
-                    frame[idx] = r
-                    frame[idx + 1] = g
-                    frame[idx + 2] = b
-                }
-
-                ScreenColorProcessor.encodeWireFrame(currentDev, frame, wireBuffer)
-
-                controllerClient.sendFrame(
-                    device = currentDev,
-                    wirePayload = wireBuffer,
-                    ledCount = leds
-                )
-                delay(100)
-            }
-        }
-    }
-
-    private fun stopTestColorStream() {
-        testColorJob?.cancel()
-        testColorJob = null
-        AmbientCaptureService.activeEngine.value?.isTestingOverride = false
     }
 
     private fun setupSliderItem(view: View, step: Float, onAdjust: (Float) -> Unit) {
@@ -316,7 +316,102 @@ class CalibrationActivity : AppCompatActivity() {
         }
     }
 
+    private fun withDraftInConfig(base: WledConfig, draft: WledDevice): WledConfig {
+        val updatedList = if (base.devices.any { it.id == draft.id }) {
+            base.devices.map { if (it.id == draft.id) draft else it }
+        } else {
+            base.devices + draft
+        }
+        return base.copy(devices = updatedList)
+    }
+
+    private fun applyDraftUpdate(updated: WledDevice, profileIdOverride: String? = null) {
+        draftDevice = updated
+        config = withDraftInConfig(config, updated).let { cfg ->
+            if (profileIdOverride != null) cfg.copy(activeProfileId = profileIdOverride) else cfg
+        }
+        setResult(
+            RESULT_OK,
+            Intent().putExtra(EXTRA_DEVICE_DRAFT_JSON, ConfigRepository.encodeDeviceJson(updated))
+        )
+        diagnosticCoordinator.updateConfig(config)
+        updateUiValues()
+    }
+
+    private fun showPresetPicker() {
+        val presets = PresetProfile.BUILT_INS
+        val names = presets.map { profile ->
+            "${profile.name} - ${profile.description}"
+        }.toTypedArray()
+
+        AlertDialog.Builder(this)
+            .setTitle("Select Calibration Preset")
+            .setItems(names) { _, which ->
+                val selected = presets[which]
+                if (selected.id == PresetProfile.CUSTOM.id) {
+                    val currentDraft = draftDevice
+                    if (currentDraft != null) {
+                        applyDraftUpdate(currentDraft, profileIdOverride = PresetProfile.CUSTOM.id)
+                    } else {
+                        lifecycleScope.launch {
+                            config = configRepo.updateConfig { cur ->
+                                cur.copy(activeProfileId = PresetProfile.CUSTOM.id)
+                            }
+                            diagnosticCoordinator.updateConfig(config)
+                            updateUiValues()
+                        }
+                    }
+                } else {
+                    activePreset = selected
+                    applySelectedPreset(selected)
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun applySelectedPreset(preset: PresetProfile) {
+        val currentDraft = draftDevice
+        if (currentDraft != null) {
+            applyDraftUpdate(
+                updated = currentDraft.copy(calibration = preset.calibration),
+                profileIdOverride = preset.id
+            )
+            return
+        }
+        lifecycleScope.launch {
+            config = configRepo.applyPreset(preset)
+            diagnosticCoordinator.updateConfig(config)
+            updateUiValues()
+        }
+    }
+
+    private fun resetToPreset() {
+        applySelectedPreset(activePreset)
+    }
+
     private fun updateTargetCalibration(transform: (ColorCalibration) -> ColorCalibration) {
+        val currentDraft = draftDevice
+        if (currentDraft != null) {
+            applyDraftUpdate(
+                updated = currentDraft.copy(calibration = transform(currentDraft.calibration)),
+                profileIdOverride = PresetProfile.CUSTOM.id
+            )
+            return
+        }
+        lifecycleScope.launch {
+            config = configRepo.updateDeviceCalibration(targetDeviceId, transform)
+            diagnosticCoordinator.updateConfig(config)
+            updateUiValues()
+        }
+    }
+
+    private fun updateTargetDeviceStrip(transform: (WledDevice) -> WledDevice) {
+        val currentDraft = draftDevice
+        if (currentDraft != null) {
+            applyDraftUpdate(transform(currentDraft))
+            return
+        }
         lifecycleScope.launch {
             val targetId = targetDeviceId
             config = configRepo.updateConfig { cur ->
@@ -325,17 +420,33 @@ class CalibrationActivity : AppCompatActivity() {
                 } else {
                     cur.primaryDevice
                 }
-                cur.updateDevice(dev.copy(calibration = transform(dev.calibration)))
+                cur.updateDevice(transform(dev))
             }
+            diagnosticCoordinator.updateConfig(config)
             updateUiValues()
         }
     }
 
     private fun updateUiValues() {
+        val isCustom = config.activeProfileId == PresetProfile.CUSTOM.id
+        val currentPresetName = if (isCustom) "Custom" else config.activeProfile.name
+        btnPresetSelector.text = currentPresetName
+
+        tvPresetDescription.text = if (isCustom) {
+            "Customized calibration curves"
+        } else {
+            config.activeProfile.description
+        }
+
+        val matchesPreset = (currentCalibration == activePreset.calibration) && !isCustom
+        btnResetPreset.isEnabled = !matchesPreset
+        btnResetPreset.alpha = if (btnResetPreset.isEnabled) 1.0f else 0.4f
+        btnResetPreset.text = "Reset to ${activePreset.name}"
+
         val c = currentCalibration
         tvSaturationValue.text = String.format(Locale.US, "%.1fx", c.saturation)
         tvContrastValue.text = String.format(Locale.US, "%.2fx", c.contrast)
-        tvColorOrderValue.text = c.colorOrder
+        tvColorOrderValue.text = targetDevice.colorOrder
 
         val briPercent = ((c.maxBrightness / 255f) * 100f).roundToInt()
         tvBrightnessValue.text = "$briPercent%"

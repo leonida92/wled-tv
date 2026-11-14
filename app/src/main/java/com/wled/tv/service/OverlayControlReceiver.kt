@@ -18,7 +18,7 @@ class OverlayControlReceiver : BroadcastReceiver() {
         val action = intent?.action ?: return
         Log.i(TAG, "Received broadcast intent: $action")
 
-        if (!AmbientCaptureService.isRunning) {
+        if (!AmbientCaptureService.isRunning.value) {
             Log.w(TAG, "Ambient capture is not running, cannot toggle overlay")
             return
         }

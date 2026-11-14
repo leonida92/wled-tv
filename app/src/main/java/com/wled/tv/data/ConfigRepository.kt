@@ -3,11 +3,13 @@ package com.wled.tv.data
 import android.content.Context
 import android.content.SharedPreferences
 import com.wled.tv.geometry.NormalizedRect
+import com.wled.tv.model.CaptureSettings
 import com.wled.tv.model.ColorCalibration
 import com.wled.tv.model.Corner
 import com.wled.tv.model.DeviceType
 import com.wled.tv.model.Direction
 import com.wled.tv.model.PerimeterConfig
+import com.wled.tv.model.PresetProfile
 import com.wled.tv.model.StreamingProtocol
 import com.wled.tv.model.WledConfig
 import com.wled.tv.model.WledDevice
@@ -22,6 +24,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
@@ -146,8 +149,17 @@ class InMemoryConfigStorage(
 }
 
 /**
+ * Result of exporting a configuration backup to disk.
+ */
+data class BackupExportResult(
+    val file: File,
+    val json: String
+)
+
+/**
  * Observable, thread-safe configuration repository exposing active lighting settings
- * as a reactive StateFlow with asynchronous disk persistence.
+ * as a reactive StateFlow with asynchronous disk persistence, schema migration,
+ * and JSON backup I/O.
  */
 class ConfigRepository(
     private val storage: ConfigStorage,
@@ -183,12 +195,92 @@ class ConfigRepository(
         return updated
     }
 
+    suspend fun applyPreset(preset: PresetProfile): WledConfig =
+        updateConfig { it.applyPreset(preset) }
+
+    suspend fun updateDeviceCalibration(
+        deviceId: String? = null,
+        transform: (ColorCalibration) -> ColorCalibration
+    ): WledConfig = updateConfig { it.updateDeviceCalibration(deviceId, transform) }
+
+    suspend fun updateCaptureSettings(
+        transform: (CaptureSettings) -> CaptureSettings
+    ): WledConfig = updateConfig { it.updateCaptureSettings(transform) }
+
     fun updateConfigBlocking(transform: (WledConfig) -> WledConfig): WledConfig = runBlocking {
         updateConfig(transform)
     }
 
+    suspend fun exportConfig(): String = withContext(ioDispatcher) {
+        exportConfigJson(_configFlow.value)
+    }
+
+    suspend fun importConfig(jsonStr: String): Boolean = withContext(ioDispatcher) {
+        try {
+            val imported = importConfigJson(jsonStr)
+            updateConfig { imported }
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Exports the current configuration as a versioned JSON backup file, preferring
+     * [primaryDir] when writable and falling back to [fallbackDir].
+     */
+    suspend fun exportBackup(primaryDir: File?, fallbackDir: File): BackupExportResult = withContext(ioDispatcher) {
+        val json = exportConfigJson(_configFlow.value)
+        val candidateDirs = listOfNotNull(primaryDir, fallbackDir)
+        var lastError: Exception? = null
+        for (dir in candidateDirs) {
+            try {
+                if (dir.exists() || dir.mkdirs()) {
+                    val targetFile = File(dir, BACKUP_FILENAME)
+                    targetFile.writeText(json)
+                    return@withContext BackupExportResult(file = targetFile, json = json)
+                }
+            } catch (e: Exception) {
+                lastError = e
+            }
+        }
+        val fallbackFile = File(fallbackDir, BACKUP_FILENAME)
+        try {
+            fallbackFile.parentFile?.mkdirs()
+            fallbackFile.writeText(json)
+            BackupExportResult(file = fallbackFile, json = json)
+        } catch (e: Exception) {
+            throw lastError ?: e
+        }
+    }
+
+    /**
+     * Locates an existing backup file in [primaryDir] or [fallbackDir], returning null if none exists.
+     */
+    suspend fun findBackupFile(primaryDir: File?, fallbackDir: File): File? = withContext(ioDispatcher) {
+        listOfNotNull(primaryDir, fallbackDir)
+            .map { File(it, BACKUP_FILENAME) }
+            .firstOrNull { it.exists() && it.isFile }
+    }
+
+    /**
+     * Reads [file] on [ioDispatcher] and imports its JSON configuration into the repository.
+     */
+    suspend fun importBackupFromFile(file: File): Boolean = withContext(ioDispatcher) {
+        try {
+            if (!file.exists() || !file.isFile) return@withContext false
+            val json = file.readText()
+            importConfig(json)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     private fun loadInitialConfig(): WledConfig {
+        migrateIfNeeded(storage)
         val autoStart = storage.getBoolean(KEY_AUTO_START, false)
+        val activeProfileId = storage.getString(KEY_ACTIVE_PROFILE_ID, PresetProfile.DEFAULT.id)
+            ?: PresetProfile.DEFAULT.id
 
         val globalCalibration = ColorCalibration(
             saturation = storage.getFloat(KEY_SATURATION, 1.6f),
@@ -201,34 +293,74 @@ class ConfigRepository(
             gammaR = storage.getFloat(KEY_GAMMA_R, 1.0f),
             gammaG = storage.getFloat(KEY_GAMMA_G, 1.0f),
             gammaB = storage.getFloat(KEY_GAMMA_B, 1.0f),
-            colorOrder = storage.getString(KEY_COLOR_ORDER, "RGB") ?: "RGB",
-            isRgbw = storage.getBoolean(KEY_RGBW, false),
-            rgbwMode = storage.getString(KEY_RGBW_MODE, "AUTO_SUBTRACT") ?: "AUTO_SUBTRACT",
-            smoothingFactor = storage.getFloat(KEY_SMOOTHING, 0.40f),
+            smoothingFactor = storage.getFloat(KEY_SMOOTHING, 0.40f)
+        )
+
+        val captureSettings = CaptureSettings(
             fps = storage.getInt(KEY_FPS, 60),
             captureWidth = storage.getInt(KEY_CAPTURE_WIDTH, 320),
             captureHeight = storage.getInt(KEY_CAPTURE_HEIGHT, 180)
         )
 
+        val fallbackColorOrder = storage.getString(KEY_COLOR_ORDER, "RGB") ?: "RGB"
+        val fallbackIsRgbw = storage.getBoolean(KEY_RGBW, false)
+        val fallbackRgbwMode = storage.getString(KEY_RGBW_MODE, "AUTO_SUBTRACT") ?: "AUTO_SUBTRACT"
+
         val devicesJson = storage.getString(KEY_DEVICES_JSON, null)
         val devices = if (!devicesJson.isNullOrBlank()) {
-            parseDevicesJson(devicesJson, globalCalibration)
+            parseDevicesJson(
+                jsonStr = devicesJson,
+                fallbackCalibration = globalCalibration,
+                fallbackColorOrder = fallbackColorOrder,
+                fallbackIsRgbw = fallbackIsRgbw,
+                fallbackRgbwMode = fallbackRgbwMode
+            )
         } else {
             // Migrate legacy single-device configuration
-            listOf(loadLegacyPrimaryDevice(globalCalibration))
+            listOf(
+                loadLegacyPrimaryDevice(
+                    globalCalibration = globalCalibration,
+                    colorOrder = fallbackColorOrder,
+                    isRgbw = fallbackIsRgbw,
+                    rgbwMode = fallbackRgbwMode
+                )
+            )
+        }
+
+        val resolvedDevices = if (devices.isEmpty()) {
+            listOf(
+                loadLegacyPrimaryDevice(
+                    globalCalibration = globalCalibration,
+                    colorOrder = fallbackColorOrder,
+                    isRgbw = fallbackIsRgbw,
+                    rgbwMode = fallbackRgbwMode
+                )
+            )
+        } else {
+            devices
         }
 
         return WledConfig(
-            devices = if (devices.isEmpty()) listOf(loadLegacyPrimaryDevice(globalCalibration)) else devices,
+            devices = resolvedDevices,
             calibration = globalCalibration,
-            autoStartOnBoot = autoStart
+            capture = captureSettings,
+            autoStartOnBoot = autoStart,
+            activeProfileId = activeProfileId
         )
     }
 
-    private fun loadLegacyPrimaryDevice(globalCalibration: ColorCalibration): WledDevice {
+    private fun loadLegacyPrimaryDevice(
+        globalCalibration: ColorCalibration,
+        colorOrder: String,
+        isRgbw: Boolean,
+        rgbwMode: String
+    ): WledDevice {
         val ip = storage.getString(KEY_IP, "192.168.1.66") ?: "192.168.1.66"
         val port = storage.getInt(KEY_PORT, 21324)
-        val protocolStr = storage.getString(KEY_PROTOCOL, if (port == 4048) StreamingProtocol.DDP.name else StreamingProtocol.DRGB.name)
+        val protocolStr = storage.getString(
+            KEY_PROTOCOL,
+            if (port == 4048) StreamingProtocol.DDP.name else StreamingProtocol.DRGB.name
+        )
         val protocol = try {
             StreamingProtocol.valueOf(protocolStr ?: StreamingProtocol.DRGB.name)
         } catch (_: Exception) {
@@ -242,10 +374,14 @@ class ConfigRepository(
             leftLeds = storage.getInt(KEY_LEFT_LEDS, 30),
             startCorner = try {
                 Corner.valueOf(storage.getString(KEY_START_CORNER, Corner.BOTTOM_LEFT.name) ?: Corner.BOTTOM_LEFT.name)
-            } catch (_: Exception) { Corner.BOTTOM_LEFT },
+            } catch (_: Exception) {
+                Corner.BOTTOM_LEFT
+            },
             direction = try {
                 Direction.valueOf(storage.getString(KEY_DIRECTION, Direction.CLOCKWISE.name) ?: Direction.CLOCKWISE.name)
-            } catch (_: Exception) { Direction.CLOCKWISE },
+            } catch (_: Exception) {
+                Direction.CLOCKWISE
+            },
             topCrop = storage.getFloat(KEY_TOP_CROP, 0.0f),
             bottomCrop = storage.getFloat(KEY_BOTTOM_CROP, 0.0f),
             leftCrop = storage.getFloat(KEY_LEFT_CROP, 0.0f),
@@ -264,156 +400,41 @@ class ConfigRepository(
             type = DeviceType.PERIMETER,
             ledCount = perimeter.totalLeds,
             perimeter = perimeter,
-            calibration = globalCalibration
+            calibration = globalCalibration,
+            colorOrder = colorOrder,
+            isRgbw = isRgbw,
+            rgbwMode = rgbwMode
         )
     }
 
-    private fun parseDevicesJson(jsonStr: String, fallbackCalibration: ColorCalibration): List<WledDevice> {
-        val list = mutableListOf<WledDevice>()
-        try {
+    private fun parseDevicesJson(
+        jsonStr: String,
+        fallbackCalibration: ColorCalibration,
+        fallbackColorOrder: String,
+        fallbackIsRgbw: Boolean,
+        fallbackRgbwMode: String
+    ): List<WledDevice> {
+        return try {
             val array = JSONArray(jsonStr)
-            for (i in 0 until array.length()) {
-                val obj = array.getJSONObject(i)
-                val id = obj.optString("id", UUID.randomUUID().toString())
-                val name = obj.optString("name", "Light $i")
-                val ip = obj.optString("ip", "192.168.1.66")
-                val port = obj.optInt("port", 21324)
-                val protocolStr = obj.optString("protocol", if (port == 4048) StreamingProtocol.DDP.name else StreamingProtocol.DRGB.name)
-                val protocol = try {
-                    StreamingProtocol.valueOf(protocolStr)
-                } catch (_: Exception) {
-                    if (port == 4048) StreamingProtocol.DDP else StreamingProtocol.DRGB
-                }
-                val enabled = obj.optBoolean("enabled", true)
-                val typeStr = obj.optString("type", DeviceType.PERIMETER.name)
-                val type = try { DeviceType.valueOf(typeStr) } catch (_: Exception) { DeviceType.PERIMETER }
-                val colorOrder = obj.optString("colorOrder", fallbackCalibration.colorOrder)
-                val ledCount = obj.optInt("ledCount", 1)
-
-                val perimeter = PerimeterConfig(
-                    topLeds = obj.optInt("topLeds", 54),
-                    rightLeds = obj.optInt("rightLeds", 30),
-                    bottomLeds = obj.optInt("bottomLeds", 54),
-                    leftLeds = obj.optInt("leftLeds", 30),
-                    startCorner = try { Corner.valueOf(obj.optString("startCorner", Corner.BOTTOM_LEFT.name)) } catch (_: Exception) { Corner.BOTTOM_LEFT },
-                    direction = try { Direction.valueOf(obj.optString("direction", Direction.CLOCKWISE.name)) } catch (_: Exception) { Direction.CLOCKWISE },
-                    topCrop = obj.optDouble("topCrop", 0.0).toFloat(),
-                    bottomCrop = obj.optDouble("bottomCrop", 0.0).toFloat(),
-                    leftCrop = obj.optDouble("leftCrop", 0.0).toFloat(),
-                    rightCrop = obj.optDouble("rightCrop", 0.0).toFloat(),
-                    depth = obj.optDouble("depth", 0.12).toFloat(),
-                    autoLetterbox = obj.optBoolean("autoLetterbox", true)
-                )
-
-                val customRect = NormalizedRect(
-                    left = obj.optDouble("rectL", 0.0).toFloat(),
-                    top = obj.optDouble("rectT", 0.0).toFloat(),
-                    right = obj.optDouble("rectR", 1.0).toFloat(),
-                    bottom = obj.optDouble("rectB", 1.0).toFloat()
-                )
-
-                val devCalibration = if (obj.has("cal_sat")) {
-                    ColorCalibration(
-                        saturation = obj.optDouble("cal_sat", fallbackCalibration.saturation.toDouble()).toFloat(),
-                        contrast = obj.optDouble("cal_con", fallbackCalibration.contrast.toDouble()).toFloat(),
-                        maxBrightness = obj.optInt("cal_bri", fallbackCalibration.maxBrightness),
-                        blackThreshold = obj.optInt("cal_blk", fallbackCalibration.blackThreshold),
-                        gainR = obj.optDouble("cal_gr", fallbackCalibration.gainR.toDouble()).toFloat(),
-                        gainG = obj.optDouble("cal_gg", fallbackCalibration.gainG.toDouble()).toFloat(),
-                        gainB = obj.optDouble("cal_gb", fallbackCalibration.gainB.toDouble()).toFloat(),
-                        gammaR = obj.optDouble("cal_gamr", fallbackCalibration.gammaR.toDouble()).toFloat(),
-                        gammaG = obj.optDouble("cal_gamg", fallbackCalibration.gammaG.toDouble()).toFloat(),
-                        gammaB = obj.optDouble("cal_gamb", fallbackCalibration.gammaB.toDouble()).toFloat(),
-                        colorOrder = colorOrder,
-                        isRgbw = obj.optBoolean("cal_rgbw", fallbackCalibration.isRgbw),
-                        rgbwMode = obj.optString("cal_rgbwm", fallbackCalibration.rgbwMode),
-                        smoothingFactor = obj.optDouble("cal_sm", fallbackCalibration.smoothingFactor.toDouble()).toFloat(),
-                        fps = fallbackCalibration.fps,
-                        captureWidth = fallbackCalibration.captureWidth,
-                        captureHeight = fallbackCalibration.captureHeight
-                    )
-                } else {
-                    fallbackCalibration.copy(
-                        colorOrder = colorOrder,
-                        isRgbw = obj.optBoolean("cal_rgbw", fallbackCalibration.isRgbw),
-                        rgbwMode = obj.optString("cal_rgbwm", fallbackCalibration.rgbwMode)
-                    )
-                }
-
-                list.add(
-                    WledDevice(
-                        id = id,
-                        name = name,
-                        ip = ip,
-                        port = port,
-                        protocol = protocol,
-                        enabled = enabled,
-                        type = type,
-                        ledCount = ledCount,
-                        perimeter = perimeter,
-                        calibration = devCalibration,
-                        customRect = customRect
-                    )
-                )
-            }
+            deserializeDevices(
+                array = array,
+                fallbackCalibration = fallbackCalibration,
+                fallbackColorOrder = fallbackColorOrder,
+                fallbackIsRgbw = fallbackIsRgbw,
+                fallbackRgbwMode = fallbackRgbwMode
+            )
         } catch (_: Exception) {
-            return emptyList()
+            emptyList()
         }
-        return list
     }
 
     private fun persistToStorage(config: WledConfig) {
         val primary = config.primaryDevice
-        val array = JSONArray()
-
-        for (dev in config.devices) {
-            val obj = JSONObject().apply {
-                put("id", dev.id)
-                put("name", dev.name)
-                put("ip", dev.ip)
-                put("port", dev.port)
-                put("protocol", dev.protocol.name)
-                put("enabled", dev.enabled)
-                put("type", dev.type.name)
-                put("colorOrder", dev.colorOrder)
-                put("ledCount", dev.ledCount)
-
-                put("topLeds", dev.perimeter.topLeds)
-                put("rightLeds", dev.perimeter.rightLeds)
-                put("bottomLeds", dev.perimeter.bottomLeds)
-                put("leftLeds", dev.perimeter.leftLeds)
-                put("startCorner", dev.perimeter.startCorner.name)
-                put("direction", dev.perimeter.direction.name)
-                put("topCrop", dev.perimeter.topCrop.toDouble())
-                put("bottomCrop", dev.perimeter.bottomCrop.toDouble())
-                put("leftCrop", dev.perimeter.leftCrop.toDouble())
-                put("rightCrop", dev.perimeter.rightCrop.toDouble())
-                put("depth", dev.perimeter.depth.toDouble())
-                put("autoLetterbox", dev.perimeter.autoLetterbox)
-
-                put("rectL", dev.customRect.left.toDouble())
-                put("rectT", dev.customRect.top.toDouble())
-                put("rectR", dev.customRect.right.toDouble())
-                put("rectB", dev.customRect.bottom.toDouble())
-
-                put("cal_sat", dev.calibration.saturation.toDouble())
-                put("cal_con", dev.calibration.contrast.toDouble())
-                put("cal_bri", dev.calibration.maxBrightness)
-                put("cal_blk", dev.calibration.blackThreshold)
-                put("cal_gr", dev.calibration.gainR.toDouble())
-                put("cal_gg", dev.calibration.gainG.toDouble())
-                put("cal_gb", dev.calibration.gainB.toDouble())
-                put("cal_gamr", dev.calibration.gammaR.toDouble())
-                put("cal_gamg", dev.calibration.gammaG.toDouble())
-                put("cal_gamb", dev.calibration.gammaB.toDouble())
-                put("cal_rgbw", dev.calibration.isRgbw)
-                put("cal_rgbwm", dev.calibration.rgbwMode)
-                put("cal_sm", dev.calibration.smoothingFactor.toDouble())
-            }
-            array.put(obj)
-        }
+        val array = serializeDevices(config.devices)
 
         val editor = storage.edit()
+        editor.putInt(KEY_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION)
+        editor.putString(KEY_ACTIVE_PROFILE_ID, config.activeProfileId)
         editor.putString(KEY_DEVICES_JSON, array.toString())
 
         editor.putString(KEY_IP, primary.ip)
@@ -444,19 +465,26 @@ class ConfigRepository(
         editor.putFloat(KEY_GAMMA_R, primary.calibration.gammaR)
         editor.putFloat(KEY_GAMMA_G, primary.calibration.gammaG)
         editor.putFloat(KEY_GAMMA_B, primary.calibration.gammaB)
-        editor.putString(KEY_COLOR_ORDER, primary.calibration.colorOrder)
-        editor.putBoolean(KEY_RGBW, primary.calibration.isRgbw)
-        editor.putString(KEY_RGBW_MODE, primary.calibration.rgbwMode)
         editor.putFloat(KEY_SMOOTHING, primary.calibration.smoothingFactor)
-        editor.putInt(KEY_FPS, config.calibration.fps)
-        editor.putInt(KEY_CAPTURE_WIDTH, config.calibration.captureWidth)
-        editor.putInt(KEY_CAPTURE_HEIGHT, config.calibration.captureHeight)
+
+        editor.putString(KEY_COLOR_ORDER, primary.colorOrder)
+        editor.putBoolean(KEY_RGBW, primary.isRgbw)
+        editor.putString(KEY_RGBW_MODE, primary.rgbwMode)
+
+        editor.putInt(KEY_FPS, config.capture.fps)
+        editor.putInt(KEY_CAPTURE_WIDTH, config.capture.captureWidth)
+        editor.putInt(KEY_CAPTURE_HEIGHT, config.capture.captureHeight)
 
         editor.apply()
     }
 
     companion object {
         const val PREFS_NAME = "wled_tv_prefs"
+        const val CURRENT_SCHEMA_VERSION = 1
+        const val KEY_SCHEMA_VERSION = "config_schema_version"
+        const val KEY_ACTIVE_PROFILE_ID = "active_profile_id"
+        const val APP_SIGNATURE = "wled-tv"
+        const val BACKUP_FILENAME = "wled_tv_backup.json"
 
         @Volatile
         private var instance: ConfigRepository? = null
@@ -468,6 +496,366 @@ class ConfigRepository(
 
         fun setInstanceForTesting(repository: ConfigRepository?) {
             instance = repository
+        }
+
+        /** Serializes a single [WledDevice] using the canonical device schema for Intent/draft passing. */
+        fun encodeDeviceJson(device: WledDevice): String = serializeDevice(device).toString()
+
+        /** Deserializes a single [WledDevice] previously encoded by [encodeDeviceJson]. */
+        fun decodeDeviceJson(json: String): WledDevice =
+            deserializeDevice(JSONObject(json), fallbackCalibration = ColorCalibration())
+
+        internal fun migrateIfNeeded(storage: ConfigStorage): Int {
+            var version = storage.getInt(KEY_SCHEMA_VERSION, 0)
+            if (version < 1) {
+                val editor = storage.edit()
+                val existingProfile = storage.getString(KEY_ACTIVE_PROFILE_ID, null)
+                if (existingProfile.isNullOrBlank()) {
+                    editor.putString(KEY_ACTIVE_PROFILE_ID, PresetProfile.DEFAULT.id)
+                }
+                editor.putInt(KEY_SCHEMA_VERSION, 1)
+                editor.commit()
+                version = 1
+            }
+            return version
+        }
+
+        internal fun exportConfigJson(
+            config: WledConfig,
+            timestamp: Long = System.currentTimeMillis()
+        ): String {
+            val root = JSONObject().apply {
+                put("app", APP_SIGNATURE)
+                put("schemaVersion", CURRENT_SCHEMA_VERSION)
+                put("timestamp", timestamp)
+                put("config", serializeConfig(config))
+            }
+            return root.toString(2)
+        }
+
+        internal fun importConfigJson(jsonStr: String): WledConfig {
+            val root = try {
+                JSONObject(jsonStr)
+            } catch (e: Exception) {
+                throw IllegalArgumentException("Malformed JSON string: ${e.message}", e)
+            }
+
+            val app = root.optString("app", "")
+            if (app != APP_SIGNATURE) {
+                throw IllegalArgumentException("Invalid app signature: '$app' (expected '$APP_SIGNATURE')")
+            }
+
+            if (!root.has("schemaVersion")) {
+                throw IllegalArgumentException("Missing 'schemaVersion' field")
+            }
+            val schemaVersion = root.getInt("schemaVersion")
+            if (schemaVersion > CURRENT_SCHEMA_VERSION) {
+                throw IllegalArgumentException(
+                    "Unsupported future schema version: $schemaVersion (max supported: $CURRENT_SCHEMA_VERSION)"
+                )
+            }
+            if (schemaVersion < 0) {
+                throw IllegalArgumentException("Invalid schema version: $schemaVersion")
+            }
+
+            val configObj = root.optJSONObject("config")
+                ?: throw IllegalArgumentException("Missing 'config' object in export payload")
+
+            return deserializeConfig(configObj)
+        }
+
+        private fun serializeConfig(config: WledConfig): JSONObject = JSONObject().apply {
+            put("activeProfileId", config.activeProfileId)
+            put("autoStartOnBoot", config.autoStartOnBoot)
+            put("capture", serializeCaptureSettings(config.capture))
+            put("calibration", serializeCalibration(config.calibration))
+            put("devices", serializeDevices(config.devices))
+        }
+
+        private fun deserializeConfig(configObj: JSONObject): WledConfig {
+            val activeProfileId = configObj.optString("activeProfileId", PresetProfile.DEFAULT.id)
+                .ifBlank { PresetProfile.DEFAULT.id }
+            val autoStartOnBoot = configObj.optBoolean("autoStartOnBoot", false)
+
+            val calObj = configObj.optJSONObject("calibration")
+            val calibration = if (calObj != null) {
+                deserializeCalibration(calObj)
+            } else {
+                ColorCalibration()
+            }
+
+            val captureObj = configObj.optJSONObject("capture")
+            val capture = when {
+                captureObj != null -> deserializeCaptureSettings(captureObj)
+                calObj != null -> deserializeCaptureSettings(calObj)
+                else -> CaptureSettings()
+            }
+
+            val fallbackColorOrder = calObj?.optString("colorOrder", "RGB")?.ifBlank { "RGB" } ?: "RGB"
+            val fallbackIsRgbw = calObj?.optBoolean("isRgbw", false) ?: false
+            val fallbackRgbwMode = calObj?.optString("rgbwMode", "AUTO_SUBTRACT")?.ifBlank { "AUTO_SUBTRACT" }
+                ?: "AUTO_SUBTRACT"
+
+            val devArray = configObj.optJSONArray("devices")
+            val devices = if (devArray != null) {
+                deserializeDevices(
+                    array = devArray,
+                    fallbackCalibration = calibration,
+                    fallbackColorOrder = fallbackColorOrder,
+                    fallbackIsRgbw = fallbackIsRgbw,
+                    fallbackRgbwMode = fallbackRgbwMode
+                )
+            } else {
+                emptyList()
+            }
+
+            return WledConfig(
+                devices = if (devices.isEmpty()) {
+                    listOf(
+                        WledDevice(
+                            calibration = calibration,
+                            colorOrder = fallbackColorOrder,
+                            isRgbw = fallbackIsRgbw,
+                            rgbwMode = fallbackRgbwMode
+                        )
+                    )
+                } else {
+                    devices
+                },
+                calibration = calibration,
+                capture = capture,
+                autoStartOnBoot = autoStartOnBoot,
+                activeProfileId = activeProfileId
+            )
+        }
+
+        private fun serializeCaptureSettings(capture: CaptureSettings): JSONObject = JSONObject().apply {
+            put("fps", capture.fps)
+            put("captureWidth", capture.captureWidth)
+            put("captureHeight", capture.captureHeight)
+        }
+
+        private fun deserializeCaptureSettings(obj: JSONObject): CaptureSettings {
+            val default = CaptureSettings()
+            return CaptureSettings(
+                fps = obj.optInt("fps", default.fps),
+                captureWidth = obj.optInt("captureWidth", default.captureWidth),
+                captureHeight = obj.optInt("captureHeight", default.captureHeight)
+            )
+        }
+
+        private fun serializeCalibration(cal: ColorCalibration): JSONObject = JSONObject().apply {
+            put("saturation", cal.saturation.toDouble())
+            put("contrast", cal.contrast.toDouble())
+            put("maxBrightness", cal.maxBrightness)
+            put("blackThreshold", cal.blackThreshold)
+            put("gainR", cal.gainR.toDouble())
+            put("gainG", cal.gainG.toDouble())
+            put("gainB", cal.gainB.toDouble())
+            put("gammaR", cal.gammaR.toDouble())
+            put("gammaG", cal.gammaG.toDouble())
+            put("gammaB", cal.gammaB.toDouble())
+            put("smoothingFactor", cal.smoothingFactor.toDouble())
+        }
+
+        private fun deserializeCalibration(
+            obj: JSONObject,
+            fallback: ColorCalibration = ColorCalibration()
+        ): ColorCalibration {
+            return ColorCalibration(
+                saturation = obj.optDouble("saturation", fallback.saturation.toDouble()).toFloat(),
+                contrast = obj.optDouble("contrast", fallback.contrast.toDouble()).toFloat(),
+                maxBrightness = obj.optInt("maxBrightness", fallback.maxBrightness),
+                blackThreshold = obj.optInt("blackThreshold", fallback.blackThreshold),
+                gainR = obj.optDouble("gainR", fallback.gainR.toDouble()).toFloat(),
+                gainG = obj.optDouble("gainG", fallback.gainG.toDouble()).toFloat(),
+                gainB = obj.optDouble("gainB", fallback.gainB.toDouble()).toFloat(),
+                gammaR = obj.optDouble("gammaR", fallback.gammaR.toDouble()).toFloat(),
+                gammaG = obj.optDouble("gammaG", fallback.gammaG.toDouble()).toFloat(),
+                gammaB = obj.optDouble("gammaB", fallback.gammaB.toDouble()).toFloat(),
+                smoothingFactor = obj.optDouble("smoothingFactor", fallback.smoothingFactor.toDouble()).toFloat()
+            )
+        }
+
+        private fun deserializeLegacyDeviceCalibration(
+            obj: JSONObject,
+            fallback: ColorCalibration
+        ): ColorCalibration {
+            return ColorCalibration(
+                saturation = obj.optDouble("cal_sat", fallback.saturation.toDouble()).toFloat(),
+                contrast = obj.optDouble("cal_con", fallback.contrast.toDouble()).toFloat(),
+                maxBrightness = obj.optInt("cal_bri", fallback.maxBrightness),
+                blackThreshold = obj.optInt("cal_blk", fallback.blackThreshold),
+                gainR = obj.optDouble("cal_gr", fallback.gainR.toDouble()).toFloat(),
+                gainG = obj.optDouble("cal_gg", fallback.gainG.toDouble()).toFloat(),
+                gainB = obj.optDouble("cal_gb", fallback.gainB.toDouble()).toFloat(),
+                gammaR = obj.optDouble("cal_gamr", fallback.gammaR.toDouble()).toFloat(),
+                gammaG = obj.optDouble("cal_gamg", fallback.gammaG.toDouble()).toFloat(),
+                gammaB = obj.optDouble("cal_gamb", fallback.gammaB.toDouble()).toFloat(),
+                smoothingFactor = obj.optDouble("cal_sm", fallback.smoothingFactor.toDouble()).toFloat()
+            )
+        }
+
+        private fun serializeDevices(devices: List<WledDevice>): JSONArray = JSONArray().apply {
+            for (dev in devices) {
+                put(serializeDevice(dev))
+            }
+        }
+
+        private fun serializeDevice(dev: WledDevice): JSONObject = JSONObject().apply {
+            put("id", dev.id)
+            put("name", dev.name)
+            put("ip", dev.ip)
+            put("port", dev.port)
+            put("protocol", dev.protocol.name)
+            put("enabled", dev.enabled)
+            put("type", dev.type.name)
+            put("ledCount", dev.ledCount)
+
+            put("colorOrder", dev.colorOrder)
+            put("isRgbw", dev.isRgbw)
+            put("rgbwMode", dev.rgbwMode)
+
+            put("topLeds", dev.perimeter.topLeds)
+            put("rightLeds", dev.perimeter.rightLeds)
+            put("bottomLeds", dev.perimeter.bottomLeds)
+            put("leftLeds", dev.perimeter.leftLeds)
+            put("startCorner", dev.perimeter.startCorner.name)
+            put("direction", dev.perimeter.direction.name)
+            put("topCrop", dev.perimeter.topCrop.toDouble())
+            put("bottomCrop", dev.perimeter.bottomCrop.toDouble())
+            put("leftCrop", dev.perimeter.leftCrop.toDouble())
+            put("rightCrop", dev.perimeter.rightCrop.toDouble())
+            put("depth", dev.perimeter.depth.toDouble())
+            put("autoLetterbox", dev.perimeter.autoLetterbox)
+
+            put("rectL", dev.customRect.left.toDouble())
+            put("rectT", dev.customRect.top.toDouble())
+            put("rectR", dev.customRect.right.toDouble())
+            put("rectB", dev.customRect.bottom.toDouble())
+
+            put("calibration", serializeCalibration(dev.calibration))
+        }
+
+        private fun deserializeDevices(
+            array: JSONArray,
+            fallbackCalibration: ColorCalibration,
+            fallbackColorOrder: String = "RGB",
+            fallbackIsRgbw: Boolean = false,
+            fallbackRgbwMode: String = "AUTO_SUBTRACT"
+        ): List<WledDevice> {
+            val list = mutableListOf<WledDevice>()
+            for (i in 0 until array.length()) {
+                val obj = array.optJSONObject(i) ?: continue
+                list.add(
+                    deserializeDevice(
+                        obj = obj,
+                        fallbackCalibration = fallbackCalibration,
+                        index = i,
+                        fallbackColorOrder = fallbackColorOrder,
+                        fallbackIsRgbw = fallbackIsRgbw,
+                        fallbackRgbwMode = fallbackRgbwMode
+                    )
+                )
+            }
+            return list
+        }
+
+        private fun deserializeDevice(
+            obj: JSONObject,
+            fallbackCalibration: ColorCalibration,
+            index: Int = 0,
+            fallbackColorOrder: String = "RGB",
+            fallbackIsRgbw: Boolean = false,
+            fallbackRgbwMode: String = "AUTO_SUBTRACT"
+        ): WledDevice {
+            val id = obj.optString("id", UUID.randomUUID().toString())
+            val name = obj.optString("name", "Light $index")
+            val ip = obj.optString("ip", "192.168.1.66")
+            val port = obj.optInt("port", 21324)
+            val protocolStr = obj.optString(
+                "protocol",
+                if (port == 4048) StreamingProtocol.DDP.name else StreamingProtocol.DRGB.name
+            )
+            val protocol = try {
+                StreamingProtocol.valueOf(protocolStr)
+            } catch (_: Exception) {
+                if (port == 4048) StreamingProtocol.DDP else StreamingProtocol.DRGB
+            }
+            val enabled = obj.optBoolean("enabled", true)
+            val typeStr = obj.optString("type", DeviceType.PERIMETER.name)
+            val type = try {
+                DeviceType.valueOf(typeStr)
+            } catch (_: Exception) {
+                DeviceType.PERIMETER
+            }
+            val ledCount = obj.optInt("ledCount", 1)
+
+            val colorOrder = obj.optString("colorOrder", fallbackColorOrder).ifBlank { fallbackColorOrder }
+            val isRgbw = when {
+                obj.has("isRgbw") -> obj.optBoolean("isRgbw", fallbackIsRgbw)
+                obj.has("cal_rgbw") -> obj.optBoolean("cal_rgbw", fallbackIsRgbw)
+                else -> fallbackIsRgbw
+            }
+            val rgbwMode = when {
+                obj.has("rgbwMode") -> obj.optString("rgbwMode", fallbackRgbwMode).ifBlank { fallbackRgbwMode }
+                obj.has("cal_rgbwm") -> obj.optString("cal_rgbwm", fallbackRgbwMode).ifBlank { fallbackRgbwMode }
+                else -> fallbackRgbwMode
+            }
+
+            val perimeter = PerimeterConfig(
+                topLeds = obj.optInt("topLeds", 54),
+                rightLeds = obj.optInt("rightLeds", 30),
+                bottomLeds = obj.optInt("bottomLeds", 54),
+                leftLeds = obj.optInt("leftLeds", 30),
+                startCorner = try {
+                    Corner.valueOf(obj.optString("startCorner", Corner.BOTTOM_LEFT.name))
+                } catch (_: Exception) {
+                    Corner.BOTTOM_LEFT
+                },
+                direction = try {
+                    Direction.valueOf(obj.optString("direction", Direction.CLOCKWISE.name))
+                } catch (_: Exception) {
+                    Direction.CLOCKWISE
+                },
+                topCrop = obj.optDouble("topCrop", 0.0).toFloat(),
+                bottomCrop = obj.optDouble("bottomCrop", 0.0).toFloat(),
+                leftCrop = obj.optDouble("leftCrop", 0.0).toFloat(),
+                rightCrop = obj.optDouble("rightCrop", 0.0).toFloat(),
+                depth = obj.optDouble("depth", 0.12).toFloat(),
+                autoLetterbox = obj.optBoolean("autoLetterbox", true)
+            )
+
+            val customRect = NormalizedRect(
+                left = obj.optDouble("rectL", 0.0).toFloat(),
+                top = obj.optDouble("rectT", 0.0).toFloat(),
+                right = obj.optDouble("rectR", 1.0).toFloat(),
+                bottom = obj.optDouble("rectB", 1.0).toFloat()
+            )
+
+            val devCalObj = obj.optJSONObject("calibration")
+            val devCalibration = when {
+                devCalObj != null -> deserializeCalibration(devCalObj, fallbackCalibration)
+                obj.has("cal_sat") -> deserializeLegacyDeviceCalibration(obj, fallbackCalibration)
+                else -> fallbackCalibration
+            }
+
+            return WledDevice(
+                id = id,
+                name = name,
+                ip = ip,
+                port = port,
+                protocol = protocol,
+                enabled = enabled,
+                type = type,
+                ledCount = ledCount,
+                perimeter = perimeter,
+                calibration = devCalibration,
+                customRect = customRect,
+                colorOrder = colorOrder,
+                isRgbw = isRgbw,
+                rgbwMode = rgbwMode
+            )
         }
 
         private const val KEY_DEVICES_JSON = "wled_devices_json"

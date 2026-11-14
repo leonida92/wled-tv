@@ -13,8 +13,8 @@ android {
         applicationId = "com.wled.tv"
         minSdk = 26
         targetSdk = 34
-        versionCode = 37
-        versionName = "1.3.5"
+        versionCode = 39
+        versionName = "1.3.7"
 
         vectorDrawables {
             useSupportLibrary = true

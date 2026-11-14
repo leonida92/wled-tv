@@ -2,6 +2,12 @@ package com.wled.tv.network
 
 import com.wled.tv.model.WledDevice
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 
 /**
  * In-memory test double of [WledControllerClient] for fast JVM unit testing.
@@ -33,6 +39,9 @@ class FakeWledControllerClient : WledControllerClient {
         }
     }
 
+    private val _reachabilityFlow = MutableStateFlow<Map<String, Boolean>>(emptyMap())
+    override val reachabilityFlow: StateFlow<Map<String, Boolean>> = _reachabilityFlow.asStateFlow()
+
     private val _sentFrames = mutableListOf<SentFrameRecord>()
     val sentFrames: List<SentFrameRecord>
         get() = synchronized(_sentFrames) { _sentFrames.toList() }
@@ -41,6 +50,11 @@ class FakeWledControllerClient : WledControllerClient {
     var blackoutCalls = 0
         private set
     val blackoutDevices = mutableListOf<List<WledDevice>>()
+
+    var probeReachabilityCalls = 0
+        private set
+
+    val discoveryFlow = MutableSharedFlow<DiscoveredWled>()
 
     var connectionCheckResult: Boolean = true
     val connectionCheckMap = mutableMapOf<String, Boolean>()
@@ -82,7 +96,22 @@ class FakeWledControllerClient : WledControllerClient {
     }
 
     override suspend fun checkConnection(ip: String): Boolean {
-        return connectionCheckMap[ip] ?: connectionCheckResult
+        val cleanIp = ip.trim()
+        val reachable = connectionCheckMap[cleanIp] ?: connectionCheckMap[ip] ?: connectionCheckResult
+        if (cleanIp.isNotEmpty()) {
+            _reachabilityFlow.update { current -> current + (cleanIp to reachable) }
+        }
+        return reachable
+    }
+
+    override suspend fun probeReachability(devices: List<WledDevice>): Map<String, Boolean> {
+        probeReachabilityCalls++
+        val uniqueIps = devices.map { it.ip.trim() }.filter { it.isNotEmpty() }.distinct()
+        val results = uniqueIps.associateWith { ip ->
+            connectionCheckMap[ip] ?: connectionCheckResult
+        }
+        _reachabilityFlow.value = results
+        return results
     }
 
     override suspend fun fetchDeviceInfo(ip: String): WledDeviceInfo? {
@@ -139,6 +168,8 @@ class FakeWledControllerClient : WledControllerClient {
         flashDevice(device, durationMs = 500L)
     }
 
+    override fun discoverDevices(): Flow<DiscoveredWled> = discoveryFlow
+
     override fun close() {
         isClosed = true
     }
@@ -149,6 +180,7 @@ class FakeWledControllerClient : WledControllerClient {
         }
         powerState.clear()
         blackoutCalls = 0
+        probeReachabilityCalls = 0
         synchronized(blackoutDevices) {
             blackoutDevices.clear()
         }
@@ -159,6 +191,7 @@ class FakeWledControllerClient : WledControllerClient {
         deviceInfoMap.clear()
         connectionCheckResult = true
         deviceInfoResult = null
+        _reachabilityFlow.value = emptyMap()
         isClosed = false
     }
 }

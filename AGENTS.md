@@ -18,6 +18,8 @@
 - **Pass 2 (v1.3.3):** Unified `WledControllerClient` deep module and shared socket lifecycle (see `docs/adr/0002-unified-wled-controller-client.md`).
 - **Pass 3 (v1.3.4):** Optical Color Pipeline Consolidation & pure byte transport (see `docs/adr/0003-optical-color-pipeline-and-wire-encoding.md`).
 - **Pass 4 (v1.3.5):** Fixture Geometry Engine & Canvas Layout Solvers (see `docs/adr/0004-fixture-geometry-engine.md`).
+- **Pass 5 (v1.3.6):** Service Decomposition, Controller Discovery Seam, and Preset Profiles (see `docs/adr/0005-service-decomposition-discovery-seam-and-preset-profiles.md`).
+- **Pass 6 (v1.3.7):** Architecture Deepening, Diagnostic Coordination, and Service Consolidation (see `docs/adr/0006-architecture-deepening-and-service-consolidation.md`).
 
 ## Agent skills
 

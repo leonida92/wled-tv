@@ -3,6 +3,7 @@ package com.wled.tv.engine
 import com.wled.tv.geometry.FixtureGeometryEngine
 import com.wled.tv.geometry.NormalizedRect
 import com.wled.tv.model.DeviceThroughputStats
+import com.wled.tv.model.DeviceType
 import com.wled.tv.model.WledDevice
 import com.wled.tv.model.ThroughputHistoryPoint
 import com.wled.tv.model.ThroughputStats
@@ -11,10 +12,13 @@ import com.wled.tv.network.DefaultWledControllerClient
 import com.wled.tv.network.WledControllerClient
 import com.wled.tv.processing.ScreenColorProcessor
 import java.nio.ByteBuffer
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 data class DeviceOverlaySnapshot(
     val deviceId: String,
     val deviceName: String,
+    val deviceType: DeviceType = DeviceType.PERIMETER,
     val zones: List<NormalizedRect>,
     val rgb: ByteArray,
     val ledCount: Int
@@ -25,6 +29,7 @@ data class DeviceOverlaySnapshot(
         other as DeviceOverlaySnapshot
         if (deviceId != other.deviceId) return false
         if (deviceName != other.deviceName) return false
+        if (deviceType != other.deviceType) return false
         if (zones != other.zones) return false
         if (!rgb.contentEquals(other.rgb)) return false
         if (ledCount != other.ledCount) return false
@@ -34,6 +39,7 @@ data class DeviceOverlaySnapshot(
     override fun hashCode(): Int {
         var result = deviceId.hashCode()
         result = 31 * result + deviceName.hashCode()
+        result = 31 * result + deviceType.hashCode()
         result = 31 * result + zones.hashCode()
         result = 31 * result + rgb.contentHashCode()
         result = 31 * result + ledCount
@@ -76,14 +82,52 @@ class AmbientStreamingEngine(
         fun onThroughputStatsUpdated(stats: ThroughputStats)
     }
 
+    /**
+     * Token representing an active diagnostic override session on [AmbientStreamingEngine].
+     * Closing the session releases live-capture suppression once no other sessions remain active.
+     */
+    interface DiagnosticOverrideSession : AutoCloseable {
+        override fun close()
+    }
+
     var liveFrameListener: LiveFrameListener? = null
     var throughputListener: ThroughputListener? = null
 
     var config: WledConfig = initialConfig
         private set
 
-    @Volatile
-    var isTestingOverride: Boolean = false
+    private val activeDiagnosticSessions = AtomicInteger(0)
+
+    /**
+     * True while one or more diagnostic sessions suppress live capture.
+     */
+    val isDiagnosticActive: Boolean
+        get() = activeDiagnosticSessions.get() > 0
+
+    /**
+     * Acquires a re-entrant diagnostic override session that suppresses live capture and streaming
+     * until [DiagnosticOverrideSession.close] is called.
+     */
+    fun acquireDiagnosticOverride(): DiagnosticOverrideSession {
+        activeDiagnosticSessions.incrementAndGet()
+        return object : DiagnosticOverrideSession {
+            private val released = AtomicBoolean(false)
+
+            override fun close() {
+                if (released.compareAndSet(false, true)) {
+                    activeDiagnosticSessions.updateAndGet { current -> (current - 1).coerceAtLeast(0) }
+                }
+            }
+        }
+    }
+
+    internal fun mirrorDiagnosticFrame(deviceId: String, canonicalRgb: ByteArray, ledCount: Int) {
+        val target = deviceBuffers[deviceId] ?: return
+        val bytesToCopy = (ledCount * 3).coerceAtMost(canonicalRgb.size).coerceAtMost(target.size)
+        if (bytesToCopy > 0) {
+            System.arraycopy(canonicalRgb, 0, target, 0, bytesToCopy)
+        }
+    }
 
     @Volatile
     var isDrmActive: Boolean = false
@@ -114,6 +158,7 @@ class AmbientStreamingEngine(
         return DeviceOverlaySnapshot(
             deviceId = device.id,
             deviceName = device.name,
+            deviceType = device.type,
             zones = zones,
             rgb = rgbCopy,
             ledCount = leds
@@ -137,6 +182,13 @@ class AmbientStreamingEngine(
             pps = pps,
             isDrmActive = isDrmActive
         )
+    }
+
+    /**
+     * Enables or disables real-time spatial sampling boundary caching in the optical processor.
+     */
+    fun setOverlayActive(active: Boolean) {
+        colorProcessor.isOverlayActive = active
     }
 
     private var lastFrameTime = 0L
@@ -214,11 +266,11 @@ class AmbientStreamingEngine(
         pixelStride: Int,
         nowMs: Long = clock.currentTimeMillis()
     ): Boolean {
-        if (isTestingOverride) {
+        if (isDiagnosticActive) {
             return false
         }
 
-        val targetFps = config.calibration.fps.coerceIn(15, 60)
+        val targetFps = config.capture.fps.coerceIn(15, 60)
         val minFrameInterval = (1000L / targetFps) - 3L
         if (lastFrameTime != 0L && nowMs - lastFrameTime < minFrameInterval) {
             return false
@@ -248,7 +300,15 @@ class AmbientStreamingEngine(
                 blackWithAudioStartTime = 0L
                 if (isDrmActive) isDrmActive = false
             }
+        } else {
+            blackWithAudioStartTime = 0L
+            if (isDrmActive) {
+                isDrmActive = false
+                lastDrmKeepaliveTime = 0L
+            }
+        }
 
+        if (isDrmActive) {
             val devices = config.enabledDevices
             for (device in devices) {
                 val leds = device.totalLeds
@@ -263,12 +323,6 @@ class AmbientStreamingEngine(
                 }
             }
         } else {
-            blackWithAudioStartTime = 0L
-            if (isDrmActive) {
-                isDrmActive = false
-                lastDrmKeepaliveTime = 0L
-            }
-
             val anyAutoLetterbox = config.enabledDevices.any { it.perimeter.autoLetterbox }
             if (anyAutoLetterbox) {
                 colorProcessor.scanBorderProbes(buffer, width, height, rowStride, pixelStride)
@@ -316,11 +370,11 @@ class AmbientStreamingEngine(
      * Returns the recommended delay in milliseconds until the next tick.
      */
     fun tickStreaming(nowMs: Long = clock.currentTimeMillis()): Long {
-        val targetFps = config.calibration.fps.coerceIn(15, 60)
+        val targetFps = config.capture.fps.coerceIn(15, 60)
         val tickIntervalMs = (1000L / targetFps).coerceAtLeast(10L)
         val startUptime = clock.uptimeMillis()
 
-        if (!isTestingOverride) {
+        if (!isDiagnosticActive) {
             val devices = config.enabledDevices
             val shouldSendPreview = liveFrameListener != null && (nowMs - lastLivePreviewTime >= 50L)
 
@@ -412,7 +466,7 @@ class AmbientStreamingEngine(
         if (elapsed >= 1000L) {
             val actualFps = ((statsFramesInCurrentSecond * 1000L) / elapsed).toInt()
             val actualPps = ((statsPacketsInCurrentSecond * 1000L) / elapsed).toInt()
-            val targetFps = config.calibration.fps.coerceIn(15, 60)
+            val targetFps = config.capture.fps.coerceIn(15, 60)
 
             val deviceStatsList = config.enabledDevices.map { dev ->
                 val devPps = (((statsPerDevicePacketsInSecond[dev.id] ?: 0) * 1000L) / elapsed).toInt()

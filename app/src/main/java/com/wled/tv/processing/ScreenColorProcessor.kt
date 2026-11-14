@@ -127,13 +127,13 @@ class ScreenColorProcessor {
     /**
      * Encodes canonical RGB pixel buffer into physical LED wire protocol format for a specific WLED device.
      */
-    fun encodeWireFrame(device: WledDevice, sourceRgb: ByteArray, outputWire: ByteArray): Int {
+    internal fun encodeWireFrame(device: WledDevice, sourceRgb: ByteArray, outputWire: ByteArray): Int {
         return encodeWireFrame(
             sourceRgb = sourceRgb,
             ledCount = device.totalLeds,
-            colorOrder = device.calibration.colorOrder,
-            isRgbw = (device.calibration.isRgbw && device.protocol == StreamingProtocol.DDP),
-            rgbwMode = device.calibration.rgbwMode,
+            colorOrder = device.colorOrder,
+            isRgbw = (device.isRgbw && device.protocol == StreamingProtocol.DDP),
+            rgbwMode = device.rgbwMode,
             outputWire = outputWire
         )
     }
@@ -478,6 +478,7 @@ class ScreenColorProcessor {
         if (width <= 0 || height <= 0) return true
         val stepX = width / 6
         val stepY = height / 6
+        // 1. Check 5x5 interior grid
         for (gy in 1..5) {
             val y = gy * stepY
             val rowOffset = y * rowStride
@@ -489,6 +490,19 @@ class ScreenColorProcessor {
                 }
             }
         }
+        // 2. Check 4 perimeter points (outer 5% margin) to catch edge lighting
+        val edgeX0 = (width * 0.05f).toInt().coerceIn(0, width - 1)
+        val edgeX1 = (width * 0.95f).toInt().coerceIn(0, width - 1)
+        val edgeY0 = (height * 0.05f).toInt().coerceIn(0, height - 1)
+        val edgeY1 = (height * 0.95f).toInt().coerceIn(0, height - 1)
+        val midX = width / 2
+        val midY = height / 2
+
+        if (isPixelNonBlack(buffer, edgeY0 * rowStride + midX * pixelStride)) return false
+        if (isPixelNonBlack(buffer, edgeY1 * rowStride + midX * pixelStride)) return false
+        if (isPixelNonBlack(buffer, midY * rowStride + edgeX0 * pixelStride)) return false
+        if (isPixelNonBlack(buffer, midY * rowStride + edgeX1 * pixelStride)) return false
+
         return true
     }
 
@@ -590,12 +604,16 @@ class ScreenColorProcessor {
             val avgDistance = kotlin.math.sqrt(sumSquaredDist / ledCount)
 
             val baseAlpha = factor.coerceIn(0.05f, 1.0f)
+            val maxAlpha = when {
+                baseAlpha >= 0.70f -> 0.90f // High-responsiveness (Gaming mode)
+                else -> (baseAlpha * 1.6f).coerceIn(baseAlpha, 0.55f) // Cinema / Standard / Eye Care gentle cap
+            }
             val alpha = when {
-                baseAlpha >= 0.90f -> baseAlpha
-                avgDistance >= 60.0 -> 0.90f
+                baseAlpha >= maxAlpha -> baseAlpha
+                avgDistance >= 60.0 -> maxAlpha
                 avgDistance >= 30.0 -> {
                     val t = ((avgDistance - 30.0) / 30.0).toFloat()
-                    baseAlpha + t * (0.90f - baseAlpha)
+                    baseAlpha + t * (maxAlpha - baseAlpha)
                 }
                 else -> baseAlpha
             }
@@ -657,7 +675,7 @@ class ScreenColorProcessor {
             }
         }
 
-        fun encodeWireFrame(
+        internal fun encodeWireFrame(
             device: WledDevice,
             sourceRgb: ByteArray,
             outputWire: ByteArray
@@ -665,14 +683,14 @@ class ScreenColorProcessor {
             return encodeWireFrame(
                 sourceRgb = sourceRgb,
                 ledCount = device.totalLeds,
-                colorOrder = device.calibration.colorOrder,
-                isRgbw = (device.calibration.isRgbw && device.protocol == StreamingProtocol.DDP),
-                rgbwMode = device.calibration.rgbwMode,
+                colorOrder = device.colorOrder,
+                isRgbw = (device.isRgbw && device.protocol == StreamingProtocol.DDP),
+                rgbwMode = device.rgbwMode,
                 outputWire = outputWire
             )
         }
 
-        fun encodeWireFrame(
+        internal fun encodeWireFrame(
             sourceRgb: ByteArray,
             ledCount: Int,
             colorOrder: String,

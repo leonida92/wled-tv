@@ -1,5 +1,6 @@
 package com.wled.tv.engine
 
+import com.wled.tv.model.CaptureSettings
 import com.wled.tv.model.ColorCalibration
 import com.wled.tv.model.DeviceType
 import com.wled.tv.model.StreamingProtocol
@@ -45,12 +46,11 @@ class AmbientStreamingEngineTest {
             protocol = StreamingProtocol.DDP,
             enabled = true,
             type = DeviceType.FULL_SCREEN,
-            ledCount = ledCount,
-            calibration = ColorCalibration(fps = fps)
+            ledCount = ledCount
         )
         return WledConfig(
             devices = listOf(device),
-            calibration = ColorCalibration(fps = fps)
+            capture = CaptureSettings(fps = fps)
         )
     }
 
@@ -305,7 +305,7 @@ class AmbientStreamingEngineTest {
     }
 
     @Test
-    fun testTestingOverride_suppressesVideoExtractionAndTransmission() {
+    fun testDiagnosticOverrideSession_suppressesVideoExtractionAndTransmission() {
         val config = createDefaultConfig(ledCount = 10)
         val engine = AmbientStreamingEngine(
             initialConfig = config,
@@ -314,24 +314,33 @@ class AmbientStreamingEngineTest {
             clock = clock
         )
 
-        engine.isTestingOverride = true
+        val session1 = engine.acquireDiagnosticOverride()
+        val session2 = engine.acquireDiagnosticOverride()
+        assertTrue(engine.isDiagnosticActive)
 
         val frame = createSolidColorFrame(r = 200, g = 100, b = 50)
         val accepted = engine.onFrameAvailable(frame, 320, 180, 320 * 4, 4)
-        assertFalse("Testing override should suppress frame intake", accepted)
+        assertFalse("Diagnostic override should suppress frame intake", accepted)
 
         fakeControllerClient.clear()
         engine.tickStreaming()
-        assertEquals("Testing override should suppress UDP transmission", 0, fakeControllerClient.sentFrames.size)
+        assertEquals("Diagnostic override should suppress UDP transmission", 0, fakeControllerClient.sentFrames.size)
 
-        engine.isTestingOverride = false
+        // Closing one session (and closing it twice idempotently) keeps suppression active until session2 closes
+        session1.close()
+        session1.close()
+        assertTrue("Suppression must remain active while session2 is open", engine.isDiagnosticActive)
+        assertFalse(engine.onFrameAvailable(frame, 320, 180, 320 * 4, 4))
+
+        session2.close()
+        assertFalse(engine.isDiagnosticActive)
         clock.advance(20L)
         val acceptedNow = engine.onFrameAvailable(frame, 320, 180, 320 * 4, 4)
-        assertTrue("Disabling testing override restores frame intake", acceptedNow)
+        assertTrue("Releasing all diagnostic sessions restores frame intake", acceptedNow)
 
         clock.advance(16L)
         engine.tickStreaming()
-        assertEquals("Disabling testing override restores UDP transmission", 1, fakeControllerClient.sentFrames.size)
+        assertEquals("Releasing all diagnostic sessions restores UDP transmission", 1, fakeControllerClient.sentFrames.size)
     }
 
     @Test
@@ -465,8 +474,8 @@ class AmbientStreamingEngineTest {
             enabled = true,
             type = DeviceType.FULL_SCREEN,
             ledCount = 2,
+            colorOrder = "GRB",
             calibration = ColorCalibration(
-                colorOrder = "GRB",
                 smoothingFactor = 1.0f
             )
         )
@@ -547,10 +556,10 @@ class AmbientStreamingEngineTest {
             enabled = true,
             type = DeviceType.FULL_SCREEN,
             ledCount = 1,
+            colorOrder = "RGB",
+            isRgbw = true,
+            rgbwMode = "AUTO_SUBTRACT",
             calibration = ColorCalibration(
-                colorOrder = "RGB",
-                isRgbw = true,
-                rgbwMode = "AUTO_SUBTRACT",
                 smoothingFactor = 1.0f
             )
         )
@@ -616,7 +625,7 @@ class AmbientStreamingEngineTest {
             type = DeviceType.FULL_SCREEN,
             enabled = true,
             ledCount = 10,
-            calibration = ColorCalibration(isRgbw = false)
+            isRgbw = false
         )
         val configRgb = WledConfig(devices = listOf(devRgb))
         val engine = AmbientStreamingEngine(
@@ -631,7 +640,7 @@ class AmbientStreamingEngineTest {
         assertEquals(30, engine.getWireBuffer("dev_toggle")?.size)
 
         // Switch to RGBW (10 LEDs * 4 bytes = 40 bytes wire buffer)
-        val devRgbw = devRgb.copy(calibration = ColorCalibration(isRgbw = true))
+        val devRgbw = devRgb.copy(isRgbw = true)
         val configRgbw = WledConfig(devices = listOf(devRgbw))
         engine.updateConfig(configRgbw)
 

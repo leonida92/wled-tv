@@ -1,0 +1,5 @@
+# Service Decomposition, Controller Discovery Seam, and Preset Profiles
+
+Decomposed `AmbientCaptureService` into three dedicated internal collaborators (`ScreenCaptureSession`, `SamplingOverlayManager`, and `DisplayPowerMonitor`), encapsulated mDNS fixture discovery into `WledControllerClient` behind a pluggable `WledDiscoveryProvider` interface seam, introduced a first-class `PresetProfile` domain model with auto-transitioning to `CUSTOM` upon manual tweaks, and added atomic JSON backup export/import with sequential `schemaVersion` migrations in `ConfigRepository`.
+
+This reduces `AmbientCaptureService` to a thin foreground service orchestrator (~150 lines), eliminates the double-spacing formatting artifacts, enables 100% JVM unit testability of network discovery via `FakeWledControllerClient`, provides instant TV viewing modes (Default, Cinema, Gaming, Vivid, Eye Care) accessible via TV remote D-pad shortcuts, and guarantees lossless backward-compatible configuration persistence across app updates.

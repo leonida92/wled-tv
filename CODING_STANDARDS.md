@@ -1,23 +1,19 @@
 # Coding Standards
 
 Judgement calls and conventions for reviewing changes in `wled-tv`.
+Mechanical import, layer-isolation, banned-API, and singleton rules are enforced automatically by `ArchitectureBoundaryTest` during `testDebugUnitTest`.
 
 ## Reactive State & Threading
 
-- **Non-blocking UI:** Mutate state asynchronously using `lifecycleScope.launch { configRepo.updateConfig { current -> ... } }`. Never block the Android main thread with `runBlocking`.
-- **Main-safe suspend functions:** All `suspend` functions on clients, repositories, and domain services must be safe to call from `Dispatchers.Main`. Wrap internal blocking I/O (sockets, OkHttp calls, file writes) with `withContext(Dispatchers.IO)`.
-- **Functional state updates:** Always modify the incoming lambda parameter `current` (e.g. `current.updateDevice(...)` or `current.copy(...)`). Never overwrite state with stale activity-local properties, as this clobbers concurrent updates.
-- **Throttled side-effects:** Network calls triggered by state emissions (e.g. HTTP wake commands in `AmbientCaptureService`) must check whether relevant target endpoint parameters (IP, port, enabled state, device count) actually changed before firing. Do not fire network requests on purely optical or calibration slider adjustments.
-- **Zero-allocation cadence loops:** High-frequency streaming and test loops (including UI diagnostic patterns like `MainActivity` rainbow test or `CalibrationActivity` preview) must pre-allocate all frame and wire buffers outside the loop. Never allocate byte buffers per iteration in a ticker or coroutine loop.
-- **Mutation-driven zone caching:** Cadence loops must never allocate collections or objects per-tick. Geometry calculations (`getActiveZones`) must return cached instances and invalidate strictly on crop state transitions or configuration mutations.
+- **Non-blocking UI & isolated drafts:** Mutate persisted state asynchronously (`lifecycleScope.launch { configRepo.updateConfig { current -> ... } }`). Keep unsaved multi-screen editor state local via Activity Result drafts (`EXTRA_DEVICE_DRAFT_JSON`), guard `configFlow` UI collectors against overwriting active drafts, and preserve drafts in `onSaveInstanceState`.
+- **Main-safe suspend functions:** Wrap blocking I/O (sockets, OkHttp, file writes) in `withContext(Dispatchers.IO)` inside clients, repositories, and coordinators so `suspend` APIs are safe on `Dispatchers.Main`.
+- **Functional state updates:** Always transform the incoming `current` snapshot inside `updateConfig { current -> ... }` rather than writing back stale activity fields.
+- **Throttled side-effects & explicit blackout:** Network wake commands triggered by state changes must verify that endpoint fields (`ip`, `port`, `enabled`, device count) actually changed before firing. Stopping a user-initiated diagnostic preview ("Off") must invoke `stopAndBlackout` rather than leaving fixtures lit.
+- **Zero-allocation cadence loops:** Streaming, diagnostic, and UI preview frame callbacks must pre-allocate and reuse byte buffers and cached zone lists (`getActiveZones`) outside per-tick loops.
 
 ## Architecture & Seams
 
-- **Unified Controller Client:** All network interactions with WLED fixtures (UDP frame streaming, device power, brightness, reachability checks, device info, and blackout) must go through `WledControllerClient`. Activities and services must never instantiate raw `DatagramSocket`, `WledUdpSender`, or `WledHttpClient` directly.
-- **Protocol-safe channel sizing:** Never calculate channel widths ad-hoc with `if (calibration.isRgbw) 4 else 3`. Always query `device.wireBytesPerLed`, which encapsulates protocol capabilities (e.g. restricting 4-channel payloads to DDP, while clamping DRGB and WARLS to 3 channels).
-- **Service as thin adapter:** `AmbientCaptureService` is an Android OS adapter for hardware capture (`MediaProjection`, `VirtualDisplay`, `ImageReader`) and foreground service lifecycle. Core color processing, streaming cadence, Widevine DRM detection, and telemetry belong in `AmbientStreamingEngine`.
-- **Encapsulated snapshots:** Views (such as `SamplingOverlayView`) must not navigate across collaborators (`engine.colorProcessor...`). Expose and consume unified snapshot models (e.g. `engine.getOverlaySnapshot()`).
-- **Pure domain primitives:** Domain models and geometric calculation engines (`NormalizedRect`, `FixtureGeometryEngine`, `ColorCalibration`) must remain pure Kotlin with zero Android framework imports (`android.graphics.*`, `android.view.*`). Android-specific types (such as `RectF`, `Canvas`, `Paint`) must be confined to the UI views layer (`ui.views.RectAdapters.kt`).
-- **Decoupled engine seams:** Optical processing (`ScreenColorProcessor`) and spatial fixture geometry (`FixtureGeometryEngine`) must have zero direct dependencies on each other. Optical processors operate strictly on normalized coordinates and pixel buffers; spatial engines map fixture structures to normalized coordinates. Coordination belongs exclusively in `AmbientStreamingEngine`.
-- **No global companion singletons:** Do not expose `DEFAULT` companion singletons for stateful or layout-solving engines. Views and services must instantiate or inject their own instances.
-- **Deterministic timing:** Time-sensitive modules must accept a `Clock` interface so fast-forwarding intervals can be verified in JVM unit tests without `Thread.sleep`.
+- **Unified client & fleet lifecycle:** Route all WLED network I/O and fleet reachability/power orchestration through `WledControllerClient` and `FleetCoordinator`; query `device.wireBytesPerLed` instead of hardcoding `3`/`4` channel widths.
+- **Service as thin OS adapter:** Keep `AmbientCaptureService` limited to Android capture hardware (`MediaProjection`, `VirtualDisplay`, `ImageReader`), locks/power listeners, and overlay lifecycle; keep color math, cadence, DRM detection, and diagnostic modes in `engine/`.
+- **Encapsulated snapshots & pure domain primitives:** Pass unified immutable snapshots (such as `DeviceOverlaySnapshot` carrying `DeviceType`) to views; confine Android graphics types (`RectF`, `Canvas`, `Paint`) to `ui/`.
+- **Deterministic timing:** Inject a `Clock` abstraction into time-sensitive components so intervals test deterministically on the JVM without `Thread.sleep`.

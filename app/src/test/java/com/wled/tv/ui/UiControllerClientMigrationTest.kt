@@ -1,7 +1,10 @@
 package com.wled.tv.ui
 
 import com.wled.tv.data.ConfigRepository
+import com.wled.tv.data.DeviceRemoveResult
+import com.wled.tv.data.DeviceToggleResult
 import com.wled.tv.data.InMemoryConfigStorage
+import com.wled.tv.data.WledFleetCoordinator
 import com.wled.tv.model.DeviceType
 import com.wled.tv.model.WledConfig
 import com.wled.tv.model.WledDevice
@@ -193,5 +196,23 @@ class UiControllerClientMigrationTest {
 
         fakeClient.turnOff(testDevice.ip)
         assertEquals(false, fakeClient.powerState[testDevice.ip])
+    }
+
+    @Test
+    fun fleetCoordinator_coordinatesToggleRemoveAndReachabilityViaControllerClient() = runBlocking {
+        val secondary = testDevice.copy(id = "dev-test-2", name = "Floor Lamp", ip = "192.168.1.121", enabled = false)
+        repo.updateConfig { cur -> cur.copy(devices = listOf(testDevice, secondary)) }
+        val coordinator = WledFleetCoordinator(repo, fakeClient)
+
+        fakeClient.connectionCheckMap[secondary.ip] = true
+        val toggleResult = coordinator.toggleDeviceEnabled(secondary.id, isStreamingActive = true)
+        assertTrue(toggleResult is DeviceToggleResult.Toggled)
+        assertEquals(true, fakeClient.powerState[secondary.ip])
+        assertEquals(true, coordinator.reachabilityFlow.value[secondary.ip])
+
+        val removeResult = coordinator.removeDevice(secondary.id)
+        assertTrue(removeResult is DeviceRemoveResult.Removed)
+        assertEquals(false, fakeClient.powerState[secondary.ip])
+        assertEquals(listOf(testDevice), repo.currentConfig.devices)
     }
 }
